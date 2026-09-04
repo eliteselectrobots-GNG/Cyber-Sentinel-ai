@@ -168,6 +168,27 @@ function AegisTraceShell() {
           ? ` Relay path traverses a Tor exit node.`
           : "";
     notify(failures > 0 ? `${result.riskLabel} risk · ${stored.caseId} — ${failures} live DNS check${failures === 1 ? "" : "s"} failed.${originNote}${infraNote}` : `${result.riskLabel} risk · case ${stored.caseId} stored in the evidence vault.${originNote}${infraNote}`);
+    // Desktop alert for high-risk verdicts, if the user has enabled notifications.
+    if ((result.riskLabel === "Critical" || result.riskLabel === "High") && typeof Notification !== "undefined" && Notification.permission === "granted") {
+      try {
+        new Notification(`AegisTrace — ${result.riskLabel} risk (${result.riskScore}/100)`, { body: `${result.subject} · case ${stored.caseId}`, tag: stored.caseId });
+      } catch {
+        // notifications are optional
+      }
+    }
+  };
+
+  const handleEnableAlerts = async () => {
+    if (typeof Notification === "undefined") {
+      notify("Desktop notifications are not supported in this browser.");
+      return;
+    }
+    if (Notification.permission === "granted") {
+      notify("Desktop alerts are already enabled.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    notify(permission === "granted" ? "Desktop alerts enabled — you will be notified on Critical/High scans." : "Permission denied — alerts stay in-app only.");
   };
 
   const handleDelete = async (id: string) => {
@@ -215,13 +236,13 @@ function AegisTraceShell() {
       case "relay":
         return <RelayTracePage scans={scans} navigate={navigate} />;
       case "campaign":
-        return <CampaignPage scans={scans} />;
+        return <CampaignPage scans={scans} onOpenCase={openCase} />;
       case "evidence":
         return <EvidenceVaultPage scans={scans} onDelete={(id) => void handleDelete(id)} navigate={navigate} notify={notify} />;
       case "health":
         return <HealthPage scans={scans} />;
       case "settings":
-        return <SettingsPage scans={scans} analyst={analyst} onAnalystChange={handleAnalystChange} onLoadDemo={handleLoadDemo} onClearAll={handleClearAll} notify={notify} />;
+        return <SettingsPage scans={scans} analyst={analyst} onAnalystChange={handleAnalystChange} onLoadDemo={handleLoadDemo} onClearAll={handleClearAll} notify={notify} onEnableAlerts={() => handleEnableAlerts()} />;
     }
   };
 

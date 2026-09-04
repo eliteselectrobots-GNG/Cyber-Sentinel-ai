@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ChevronRight, Download, Fingerprint, Globe2, Link2, Mail, MapPin, Network, RefreshCw, Server, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Download, FileText, Fingerprint, Globe2, Link2, Mail, MapPin, Network, RefreshCw, Search, Server, Trash2, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,8 @@ import { extractIocs, iocTotals, relatedCases, type IoC } from "@/lib/iocs";
 import { distanceKm, flagEmoji, locationLabel, type GeoInfo } from "@/lib/geo";
 import { DemoTag, EmptyState, GeoLine, InfraChips, IntegrityBadge, PageHeader, SeverityBadge, timeAgo, type PageKey } from "./ui";
 import { ClassTag } from "./ui";
-import { classifyEmail, classMeta, getOrgDomain, headerForensics, type AnalysisFlag, type Classification } from "@/lib/advanced";
+import { classifyEmail, classMeta, getOrgDomain, headerForensics, attributionOf, type AnalysisFlag, type Classification } from "@/lib/advanced";
+import { openHtmlReport } from "@/lib/html-report";
 
 function downloadReport(scan: StoredScan) {
   const iocs = extractIocs(scan.raw, scan.result);
@@ -75,7 +76,16 @@ export function InvestigationsPage({
   navigate: (page: PageKey) => void;
   notify: (msg: string) => void;
 }) {
-  const selected = scans.find((s) => s.id === selectedId) ?? scans[0] ?? null;
+  const [query, setQuery] = useState("");
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return scans;
+    return scans.filter((scan) => {
+      const haystack = `${scan.caseId} ${scan.result.sender} ${scan.result.senderAddress} ${scan.result.subject}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [scans, query]);
+  const selected = visible.find((s) => s.id === selectedId) ?? visible[0] ?? scans[0] ?? null;
 
   return (
     <>
@@ -86,8 +96,15 @@ export function InvestigationsPage({
         </div>
       ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(280px,0.55fr)_minmax(0,1.45fr)]">
-          <div className="max-h-[75vh] divide-y divide-border overflow-y-auto border border-border bg-surface">
-            {scans.map((scan) => (
+          <div className="flex flex-col border border-border bg-surface">
+            <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+              <Search className="size-3.5 shrink-0 text-muted-foreground" />
+              <input aria-label="Search cases" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search sender, subject, case id…" className="h-7 w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground" />
+              {query && <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{visible.length}/{scans.length}</span>}
+            </div>
+            <div className="max-h-[68vh] divide-y divide-border overflow-y-auto">
+              {visible.length === 0 && <p className="px-4 py-6 text-center text-xs text-muted-foreground">No cases match “{query}”.</p>}
+            {visible.map((scan) => (
               <button key={scan.id} onClick={() => onSelect(scan.id)} className={`flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-surface-elevated ${selected?.id === scan.id ? "bg-surface-elevated" : ""}`}>
                 <div className={`flex size-9 shrink-0 items-center justify-center text-[11px] font-semibold ${scan.result.riskLabel === "Critical" ? "bg-status-critical/15 text-status-critical" : scan.result.riskLabel === "High" ? "bg-status-warning/15 text-status-warning" : scan.result.riskLabel === "Medium" ? "bg-brand/10 text-brand" : "bg-status-safe/10 text-status-safe"}`}>{scan.result.sender.slice(0, 2).toUpperCase()}</div>
                 <div className="min-w-0 flex-1">
@@ -97,6 +114,7 @@ export function InvestigationsPage({
                 </div>
               </button>
             ))}
+            </div>
           </div>
 
           {selected && <CaseDetail scan={selected} scans={scans} onSelect={onSelect} onDelete={onDelete} notify={notify} />}
@@ -144,6 +162,7 @@ function CaseDetail({ scan, scans, onSelect, onDelete, notify }: { scan: StoredS
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => downloadReport(scan)}><Download className="size-3.5" />Report</Button>
+            <Button variant="outline" size="sm" onClick={() => openHtmlReport(scan, scans)}><FileText className="size-3.5" />HTML report</Button>
             <Button variant="outline" size="sm" onClick={() => void runVerify()} disabled={verifyState === "checking"}><RefreshCw className={`size-3.5 ${verifyState === "checking" ? "animate-spin" : ""}`} />Re-verify</Button>
             <Button variant="ghost" size="icon" aria-label="Delete case" className="text-muted-foreground hover:text-status-critical" onClick={() => onDelete(scan.id)}><Trash2 className="size-4" /></Button>
           </div>
@@ -621,8 +640,15 @@ const detectionTone: Record<"critical" | "warning" | "brand" | "safe", { hero: s
 
 function DetectionTab({ scan, scans }: { scan: StoredScan; scans: StoredScan[] }) {
   const detection = useMemo<Classification>(() => classifyEmail(scan, scans, getOrgDomain()), [scan, scans]);
+  const attribution = useMemo(() => attributionOf(scan, scans, getOrgDomain()), [scan, scans]);
   const meta = classMeta[detection.className];
   const tone = detectionTone[meta.tone];
+  const driverTone: Record<AnalysisFlag["severity"], string> = {
+    critical: "border-status-critical/40 bg-status-critical/10 text-status-critical",
+    high: "border-status-warning/40 bg-status-warning/10 text-status-warning",
+    medium: "border-brand/40 bg-brand/10 text-brand",
+    info: "border-border bg-shell text-muted-foreground",
+  };
 
   const tacticGroups = [
     { label: "Urgency pressure", items: detection.tactics.urgency },
@@ -650,6 +676,23 @@ function DetectionTab({ scan, scans }: { scan: StoredScan; scans: StoredScan[] }
         <div className="mt-4 h-1.5 bg-muted">
           <div className={`h-full ${tone.bar}`} style={{ width: `${Math.max(3, detection.confidence)}%` }} />
         </div>
+      </div>
+
+      <div className="border border-border bg-surface-elevated/50 p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Origin attribution · identity correlation</p>
+            <p className="font-display text-base font-semibold text-foreground">{attribution.label} <span className="font-mono text-[10px] text-muted-foreground">confidence {attribution.confidence}%</span></p>
+            <p className="mt-0.5 max-w-3xl text-[11px] leading-5 text-muted-foreground">{attribution.description}</p>
+          </div>
+        </div>
+        {attribution.drivers.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {attribution.drivers.map((driver) => (
+              <span key={driver.label} title={driver.detail} className={`border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${driverTone[driver.severity]}`}>{driver.label}</span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

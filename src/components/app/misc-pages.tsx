@@ -1,7 +1,8 @@
-import { AlertTriangle, CheckCircle2, Database, FlaskConical, HardDrive, KeyRound, Network, Server, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, BellRing, CheckCircle2, Database, FlaskConical, HardDrive, KeyRound, Network, Server, ShieldCheck, Trash2, XCircle } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { campaignClusters, originIpOf } from "@/lib/stats";
+import { extractIocs } from "@/lib/iocs";
 import type { StoredScan } from "@/lib/store";
 import { Card, CardHeader, EmptyState, GeoLine, InfraChips, PageHeader, timeAgo, type PageKey } from "./ui";
 
@@ -78,41 +79,209 @@ export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navig
   );
 }
 
-export function CampaignPage({ scans }: { scans: StoredScan[] }) {
+type GraphNode = { id: string; kind: "case" | "domain" | "ip"; label: string; sub: string; scanId?: string; risk: number; demo: boolean; degree: number };
+type GraphEdge = { from: string; to: string; risk: number };
+
+const graphRiskColor = (risk: number) => (risk >= 75 ? "#e5484d" : risk >= 55 ? "#c9a227" : risk >= 30 ? "#7c69ef" : "#53d88a");
+
+function buildGraph(scans: StoredScan[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const byId = new Map<string, GraphNode>();
+  const addNode = (node: GraphNode) => {
+    if (!byId.has(node.id)) {
+      byId.set(node.id, node);
+      nodes.push(node);
+    }
+    return byId.get(node.id)!;
+  };
+
+  const limited = scans.slice(0, 14);
+  for (const scan of limited) {
+    const r = scan.result;
+    const senderDomain = r.senderAddress.split("@")[1]?.toLowerCase() ?? "";
+    const replyDomain = r.replyTo.includes("@") ? r.replyTo.split("@")[1]?.toLowerCase() ?? "" : "";
+    const originIp = originIpOf(scan);
+    const caseNode = addNode({
+      id: `case-${scan.id}`,
+      kind: "case",
+      label: scan.caseId,
+      sub: r.subject.slice(0, 34),
+      scanId: scan.id,
+      risk: r.riskScore,
+      demo: scan.demo === true,
+      degree: 0,
+    });
+    const link = (target: { id: string } | undefined) => {
+      if (target && target.id !== `case-${scan.id}`) edges.push({ from: caseNode.id, to: target.id, risk: r.riskScore });
+    };
+    if (senderDomain) {
+      link(addNode({ id: `dom-${senderDomain}`, kind: "domain", label: senderDomain, sub: "sender domain", risk: r.riskScore, demo: scan.demo === true, degree: 0 }));
+    }
+    if (replyDomain && replyDomain !== senderDomain) {
+      link(addNode({ id: `dom-${replyDomain}`, kind: "domain", label: replyDomain, sub: "reply-to domain", risk: r.riskScore, demo: scan.demo === true, degree: 0 }));
+    }
+    if (originIp && originIp !== "Not disclosed") {
+      const geo = scan.geo?.[originIp];
+      link(addNode({ id: `ip-${originIp}`, kind: "ip", label: originIp, sub: geo ? `${geo.city}, ${geo.country}` : "origin IP", risk: r.riskScore, demo: (geo?.source ?? scan.demo) === "demo" || scan.demo === true, degree: 0 }));
+    }
+    // A couple of extra domains from the extracted IoCs round out the picture.
+    for (const ioc of extractIocs(scan.raw, r)) {
+      if (nodes.length >= 40) break;
+      if (ioc.type === "Domain" && ioc.value.toLowerCase() !== senderDomain && ioc.value.toLowerCase() !== replyDomain) {
+        link(addNode({ id: `dom-${ioc.value.toLowerCase()}`, kind: "domain", label: ioc.value.toLowerCase(), sub: "indicator domain", risk: r.riskScore, demo: scan.demo === true, degree: 0 }));
+      }
+    }
+  }
+
+  // Degree = number of distinct cases attached to a node (shared-infrastructure strength).
+  const caseLinks = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    const caseId = edge.from.startsWith("case-") ? edge.from : edge.to;
+    const other = edge.from.startsWith("case-") ? edge.to : edge.from;
+    if (!caseLinks.has(other)) caseLinks.set(other, new Set());
+    caseLinks.get(other)!.add(caseId);
+  }
+  for (const node of nodes) {
+    node.degree = caseLinks.get(node.id)?.size ?? 0;
+  }
+  return { nodes, edges };
+}
+
+function ThreatGraphSvg({ graph, onOpenCase }: { graph: ReturnType<typeof buildGraph>; onOpenCase?: (id: string) => void }) {
+  if (graph.nodes.length === 0) return null;
+  const W = 1020;
+  const columns: Record<GraphNode["kind"], { x: number; w: number }> = {
+    case: { x: 40, w: 190 },
+    domain: { x: 410, w: 190 },
+    ip: { x: 790, w: 180 },
+  };
+  const rowIndex = new Map<string, number>();
+  const colCounts: Record<GraphNode["kind"], number> = { case: 0, domain: 0, ip: 0 };
+  const positions = new Map<string, { x: number; y: number; h: number; w: number }>();
+  for (const node of graph.nodes) {
+    const index = colCounts[node.kind];
+    rowIndex.set(node.id, index);
+    colCounts[node.kind] = index + 1;
+  }
+  const rowH = 46;
+  const maxRows = Math.max(colCounts.case, colCounts.domain, colCounts.ip, 1);
+  const H = maxRows * rowH + 90;
+  for (const node of graph.nodes) {
+    const col = columns[node.kind];
+    const index = rowIndex.get(node.id) ?? 0;
+    const h = node.kind === "case" ? 42 : 26;
+    const w = col.w;
+    const y = 60 + index * rowH + (node.kind === "case" ? 0 : 8);
+    positions.set(node.id, { x: col.x, y, h, w });
+  }
+  const center = (id: string) => {
+    const pos = positions.get(id);
+    return pos ? { x: pos.x + pos.w / 2, y: pos.y + pos.h / 2 } : { x: 0, y: 0 };
+  };
+  const shared = graph.nodes.filter((node) => node.degree >= 2);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Threat relationship graph" style={{ minHeight: 300 }}>
+      <defs>
+        <pattern id="graph-grid" width="26" height="26" patternUnits="userSpaceOnUse">
+          <circle cx="1.5" cy="1.5" r="1.1" fill="rgba(124,105,239,0.16)" />
+        </pattern>
+      </defs>
+      <rect width={W} height={H} fill="#15152a" />
+      <rect width={W} height={H} fill="url(#graph-grid)" />
+      {graph.edges.map((edge, index) => {
+        const a = center(edge.from);
+        const b = center(edge.to);
+        const bend = Math.max(24, (b.x - a.x) * 0.42);
+        return (
+          <path key={`${edge.from}-${edge.to}-${index}`} d={`M ${a.x} ${a.y} C ${a.x + bend} ${a.y}, ${b.x - bend} ${b.y}, ${b.x} ${b.y}`} fill="none" stroke={graphRiskColor(edge.risk)} strokeWidth="1.1" opacity="0.28" />
+        );
+      })}
+      {graph.nodes.map((node) => {
+        const pos = positions.get(node.id)!;
+        const stroke = node.kind === "case" ? graphRiskColor(node.risk) : node.kind === "domain" ? "#7c69ef" : "#4f9cf7";
+        const isShared = node.degree >= 2;
+        return (
+          <g key={node.id} className="cursor-pointer" onClick={node.kind === "case" && node.scanId && onOpenCase ? () => onOpenCase(node.scanId!) : undefined}>
+            {isShared && <rect x={pos.x - 5} y={pos.y - 5} width={pos.w + 10} height={pos.h + 10} rx={9} fill="none" stroke="#c9a227" strokeWidth="1" strokeDasharray="4 3" opacity="0.9" />}
+            <rect x={pos.x} y={pos.y} width={pos.w} height={pos.h} rx={node.kind === "case" ? 7 : 5} fill={node.kind === "case" ? "#1c1c3a" : "#181830"} stroke={stroke} strokeWidth={node.kind === "case" ? 1.4 : 1} />
+            {node.kind === "case" ? (
+              <>
+                <text x={pos.x + 10} y={pos.y + 15} fontSize="10.5" fontFamily="IBM Plex Mono, monospace" fontWeight="600" fill="#eef0fa">{node.label}{node.demo ? " · demo" : ""}</text>
+                <text x={pos.x + 10} y={pos.y + 28} fontSize="8" fontFamily="IBM Plex Mono, monospace" fill="#8b93a7">{node.sub.slice(0, 26)}</text>
+                <text x={pos.x + pos.w - 10} y={pos.y + 15} fontSize="9" fontFamily="IBM Plex Mono, monospace" textAnchor="end" fill={graphRiskColor(node.risk)}>{node.risk}</text>
+              </>
+            ) : (
+              <>
+                <text x={pos.x + 8} y={pos.y + 16} fontSize="9.5" fontFamily="IBM Plex Mono, monospace" fill="#eef0fa">{node.label.slice(0, 26)}</text>
+                <title>{`${node.label} — ${node.sub}${node.degree >= 2 ? ` · shared by ${node.degree} cases` : ""}`}</title>
+              </>
+            )}
+            {node.kind === "case" && <title>{`${node.label} · ${node.sub} · risk ${node.risk}/100 — click to open`}</title>}
+          </g>
+        );
+      })}
+      <g fontSize="9" fontFamily="IBM Plex Mono, monospace">
+        <text x={40} y={24} fill="#5b6478">CASES</text>
+        <text x={410} y={24} fill="#5b6478">SENDER / REPLY / IOC DOMAINS</text>
+        <text x={790} y={24} fill="#5b6478">ORIGIN IPS</text>
+        <text x={W - 40} y={H - 14} textAnchor="end" fill="#5b6478">click a case to open it · dashed outline = infrastructure shared by 2+ cases</text>
+      </g>
+    </svg>
+  );
+}
+
+export function CampaignPage({ scans, onOpenCase }: { scans: StoredScan[]; onOpenCase?: (id: string) => void }) {
+  const graph = useMemo(() => buildGraph(scans), [scans]);
   const clusters = campaignClusters(scans).filter((c) => c.count >= 2);
+  const sharedNodes = graph.nodes.filter((node) => node.degree >= 2).length;
   return (
     <>
-      <PageHeader title="Campaign graph" description="Messages sharing infrastructure — the same origin IP or sender domain — are correlated automatically. Graph visualization arrives with the server build." />
-      {clusters.length === 0 ? (
-        <div className="border border-border bg-surface">
-          <EmptyState title="No campaign clusters yet" detail="Scan at least two messages that share an origin IP or sender domain, and the cluster will appear here." />
-        </div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {clusters.map((cluster) => (
-            <Card key={cluster.key}>
-              <div className="flex items-start justify-between gap-3 border-b border-border p-5">
-                <div>
-                  <div className="flex items-center gap-2"><Network className="size-4 text-brand" /><h3 className="font-display text-base font-semibold">{cluster.label}</h3></div>
-                  <p className="mt-1 text-xs text-muted-foreground">{cluster.count} scan{cluster.count === 1 ? "" : "s"} correlated</p>
+      <PageHeader title="Threat relationship graph" description="How every stored case connects to its sender domains, reply domains, indicator domains, and origin IPs — shared infrastructure is highlighted and linked to each investigation." />
+      <div className="mb-4 grid gap-px border border-border bg-border sm:grid-cols-3">
+        <div className="bg-surface p-5"><p className="mb-4 text-xs font-medium text-muted-foreground">Cases mapped</p><p className="font-display text-3xl font-semibold">{graph.nodes.filter((node) => node.kind === "case").length}</p><p className="mt-3 font-mono text-[10px] text-muted-foreground">investigation nodes</p></div>
+        <div className="bg-surface p-5"><p className="mb-4 text-xs font-medium text-muted-foreground">Infrastructure nodes</p><p className="font-display text-3xl font-semibold">{graph.nodes.filter((node) => node.kind !== "case").length}</p><p className="mt-3 font-mono text-[10px] text-muted-foreground">domains + origin IPs</p></div>
+        <div className="bg-surface p-5"><p className="mb-4 text-xs font-medium text-muted-foreground">Shared infrastructure</p><p className="font-display text-3xl font-semibold">{sharedNodes}</p><p className="mt-3 font-mono text-[10px] text-brand">{clusters.length} campaign cluster{clusters.length === 1 ? "" : "s"} detected</p></div>
+      </div>
+      <div className="border border-border bg-surface">
+        {graph.nodes.length === 0 ? (
+          <EmptyState title="No relationships to map yet" detail="Scan at least one message with disclosed sender domains or origin IPs, and its place in the graph appears here." />
+        ) : (
+          <div className="overflow-x-auto">
+            {onOpenCase ? <ThreatGraphSvg graph={graph} onOpenCase={onOpenCase} /> : <ThreatGraphSvg graph={graph} />}
+          </div>
+        )}
+      </div>
+      {clusters.length > 0 && (
+        <div className="mt-6">
+          <h2 className="mb-3 font-display text-base font-semibold">Correlated campaigns</h2>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {clusters.map((cluster) => (
+              <Card key={cluster.key}>
+                <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+                  <div>
+                    <div className="flex items-center gap-2"><Network className="size-4 text-brand" /><h3 className="font-display text-base font-semibold">{cluster.label}</h3></div>
+                    <p className="mt-1 text-xs text-muted-foreground">{cluster.count} scan{cluster.count === 1 ? "" : "s"} correlated</p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`font-mono text-lg font-semibold ${cluster.worstRisk >= 75 ? "text-status-critical" : cluster.worstRisk >= 55 ? "text-status-warning" : "text-brand"}`}>{cluster.worstRisk}</p>
+                    <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">worst risk</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className={`font-mono text-lg font-semibold ${cluster.worstRisk >= 75 ? "text-status-critical" : cluster.worstRisk >= 55 ? "text-status-warning" : "text-brand"}`}>{cluster.worstRisk}</p>
-                  <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">worst risk</p>
+                <div className="space-y-3 p-5">
+                  <div>
+                    <p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Origins</p>
+                    <p className="font-mono text-xs text-foreground">{cluster.origins.join(", ") || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Sender / reply domains</p>
+                    <p className="break-all font-mono text-xs text-foreground">{cluster.domains.join(", ") || "—"}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-3 p-5">
-                <div>
-                  <p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Origins</p>
-                  <p className="font-mono text-xs text-foreground">{cluster.origins.join(", ") || "—"}</p>
-                </div>
-                <div>
-                  <p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Sender / reply domains</p>
-                  <p className="break-all font-mono text-xs text-foreground">{cluster.domains.join(", ") || "—"}</p>
-                </div>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            ))}
+          </div>
         </div>
       )}
     </>
@@ -180,7 +349,7 @@ export function HealthPage({ scans }: { scans: StoredScan[] }) {
   );
 }
 
-export function SettingsPage({ scans, analyst, onAnalystChange, onLoadDemo, onClearAll, notify }: { scans: StoredScan[]; analyst: string; onAnalystChange: (name: string) => void; onLoadDemo: () => Promise<void>; onClearAll: () => Promise<void>; notify: (msg: string) => void }) {
+export function SettingsPage({ scans, analyst, onAnalystChange, onLoadDemo, onClearAll, notify, onEnableAlerts }: { scans: StoredScan[]; analyst: string; onAnalystChange: (name: string) => void; onLoadDemo: () => Promise<void>; onClearAll: () => Promise<void>; notify: (msg: string) => void; onEnableAlerts: () => Promise<void> }) {
   return (
     <>
       <PageHeader title="Settings" description="Workspace identity and local evidence controls. All data lives in this browser only." />
@@ -196,6 +365,16 @@ export function SettingsPage({ scans, analyst, onAnalystChange, onLoadDemo, onCl
               placeholder="Enter your name (shown locally)"
               className="h-9 w-full border border-input bg-shell px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-brand"
             />
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Real-time alerts" subtitle="Desktop notifications when a scan returns Critical or High risk" />
+          <div className="p-5">
+            <div className="flex items-start gap-2 text-[11px] leading-5 text-muted-foreground"><BellRing className="mt-0.5 size-3.5 shrink-0 text-brand" /><span>With permission, a native desktop notification fires the moment a scan is classified Critical or High — so the analyst is alerted without keeping the tab focused.</span></div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => void onEnableAlerts()}><BellRing className="size-3.5" />Enable desktop alerts</Button>
+              <span className="self-center font-mono text-[9px] uppercase tracking-wider text-muted-foreground">in-app alerts always active</span>
+            </div>
           </div>
         </Card>
         <Card>

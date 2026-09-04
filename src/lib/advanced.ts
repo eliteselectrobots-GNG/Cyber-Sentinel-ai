@@ -1020,6 +1020,149 @@ export function classifyEmail(scan: StoredScan, all: StoredScan[], orgDomain: st
 }
 
 /* ------------------------------------------------------------------ */
+/* Identity correlation & attribution                                  */
+/* ------------------------------------------------------------------ */
+
+export type AttributionClass = "verified-identity" | "spoofed-identity" | "compromised-account" | "anonymized-actor" | "malicious-actor" | "unverified";
+
+export type Attribution = {
+  className: AttributionClass;
+  label: string;
+  description: string;
+  confidence: number;
+  drivers: AnalysisFlag[];
+};
+
+export const attributionMeta: Record<AttributionClass, { label: string; description: string }> = {
+  "verified-identity": {
+    label: "Verified sender identity",
+    description: "Authentication passes live and no deception or malicious-infrastructure signals were found — the message is plausibly from the party it claims.",
+  },
+  "spoofed-identity": {
+    label: "Spoofed / impersonated identity",
+    description: "The displayed identity does not match the sending infrastructure — lookalike domain, display-name impersonation, or misaligned envelope fields.",
+  },
+  "compromised-account": {
+    label: "Possible compromised account",
+    description: "The sender passes authentication for a known domain, but behavior (origin shift, unusual hour, phishing content) suggests the mailbox may be controlled by an attacker.",
+  },
+  "anonymized-actor": {
+    label: "Anonymized infrastructure",
+    description: "The message traversed anonymizing infrastructure (Tor exit or relay operator) — commonly used to hide the true sender location.",
+  },
+  "malicious-actor": {
+    label: "Direct malicious actor",
+    description: "Origin infrastructure is blacklisted or carries confirmed attack patterns with failing authentication — consistent with a spam/botnet or phishing operator.",
+  },
+  unverified: {
+    label: "Identity unverified",
+    description: "Not enough verifiable signal (hidden origin, no live auth) — treat the sender as untrusted until confirmed through another channel.",
+  },
+};
+
+/**
+ * Confidence-based attribution: which party most plausibly stands behind this
+ * message — a verified organization, a spoofed identity, a compromised
+ * mailbox, anonymizing infrastructure, or a direct attacker.
+ */
+export function attributionOf(scan: StoredScan, all: StoredScan[], orgDomain: string): Attribution {
+  const r = scan.result;
+  const drivers: AnalysisFlag[] = [];
+  const weight = (severity: FlagSeverity) => (severity === "critical" ? 22 : severity === "high" ? 14 : severity === "medium" ? 7 : 2);
+
+  const checks = scan.auth?.checks ?? [];
+  const authFails = checks.filter((check) => check.outcome === "fail");
+  const authPasses = checks.filter((check) => check.outcome === "pass");
+  for (const check of authFails) drivers.push({ label: `${check.kind} failed (live)`, detail: check.detail, severity: "high" });
+  for (const check of authPasses.slice(0, 2)) drivers.push({ label: `${check.kind} passed (live)`, detail: check.detail, severity: "info" });
+
+  const senderDomain = r.senderAddress.split("@")[1]?.toLowerCase() ?? "";
+  const replyDomain = r.replyTo.includes("@") ? r.replyTo.split("@")[1]?.toLowerCase() ?? "" : "";
+  const originIp = originIpOf(scan);
+  const originInfra = originIp ? (scan.infra?.[originIp] ?? null) : null;
+  const anyTor = Object.values(scan.infra ?? {}).some((entry) => entry.torExit);
+  const anyBlacklisted = Object.values(scan.infra ?? {}).some((entry) => entry.blacklists.length > 0);
+  const originBlacklisted = originInfra !== null && originInfra.blacklists.length > 0;
+  const originCloud = originInfra?.cloudHosting === true;
+
+  // Reuse the impersonation/spoofing signals already computed for classification.
+  const iocs = extractIocs(scan.raw, r);
+  const analysis = analyzeIocs(iocs, all, orgDomain);
+  const domainImpersonates = [...analysis.domains.values()].flatMap((entry) => entry.impersonates);
+  const urlImpersonates = [...analysis.urls.values()].flatMap((entry) => entry.impersonates);
+  const spoofing = spoofingSignals(scan, all, orgDomain);
+  const displayImpersonation = spoofing.find((flag) => flag.label === "Display-name impersonation" || flag.label === "Free-mail sender posing as an organization");
+  if (displayImpersonation) drivers.push(displayImpersonation);
+  if (domainImpersonates.length > 0) {
+    drivers.push({ label: "Lookalike domain", detail: `${senderDomain} resembles ${domainImpersonates.join(", ")}.`, severity: "critical" });
+  }
+  if (urlImpersonates.length > 0) {
+    drivers.push({ label: "Link impersonation", detail: `A link host resembles ${urlImpersonates.join(", ")}.`, severity: "high" });
+  }
+  const envelopeMismatch = spoofing.find((flag) => flag.label === "Sender / Return-Path mismatch");
+  if (envelopeMismatch) drivers.push(envelopeMismatch);
+
+  const anomalies = anomaliesFor(scan, all);
+  const originShift = anomalies.find((anomaly) => anomaly.label === "Origin country shift");
+  const timezoneOdd = anomalies.find((anomaly) => anomaly.label === "Sender-timezone inconsistency");
+  if (originShift) drivers.push(originShift);
+  if (timezoneOdd) drivers.push(timezoneOdd);
+
+  // Does the sender look like an already-known entity in this workspace?
+  const knownSenderDomain = all.some((other) => other.id !== scan.id && other.result.senderAddress.toLowerCase().endsWith(`@${senderDomain}`));
+  const replyMismatch = replyDomain && replyDomain !== senderDomain;
+
+  const contentRisk = r.riskScore >= 55;
+  const hasFinancialOrCredentialLure = /(verify (your )?(account|password)|invoice|payment|bank details|password|credential)/i.test(`${r.subject} ${r.bodyPreview}`);
+  const torNote = anyTor ? "at least one hop traverses a Tor exit relay" : "";
+  const blacklistNote = originBlacklisted ? `the origin IP is blacklisted (${originInfra?.blacklists.map((hit) => hit.list).join(", ")})` : anyBlacklisted ? "a hop IP is blacklisted" : "";
+
+  let className: AttributionClass;
+
+  if (displayImpersonation || domainImpersonates.length > 0 || urlImpersonates.length > 0 || envelopeMismatch) {
+    className = "spoofed-identity";
+    if (torNote) drivers.push({ label: "Anonymizing relay", detail: `In addition to the spoofing signals, ${torNote}.`, severity: "high" });
+  } else if (originShift && (authPasses.length > 0 || knownSenderDomain) && !anyTor && !anyBlacklisted) {
+    className = "compromised-account";
+    drivers.push({ label: "Authenticated but behaviorally anomalous", detail: "The sender authenticates for a known domain yet originates from a new country — the classic compromised-mailbox pattern.", severity: "high" });
+  } else if ((contentRisk || hasFinancialOrCredentialLure) && authPasses.length > 0 && knownSenderDomain && (originShift || timezoneOdd || contentRisk)) {
+    className = "compromised-account";
+  } else if (originBlacklisted || (authFails.length > 0 && contentRisk && !knownSenderDomain)) {
+    className = "malicious-actor";
+    if (blacklistNote) drivers.push({ label: "Blacklisted origin infrastructure", detail: blacklistNote, severity: "critical" });
+  } else if (anyTor || originInfra?.torExit) {
+    className = "anonymized-actor";
+    drivers.push({ label: "Tor exit in relay path", detail: torNote, severity: "high" });
+  } else if (authPasses.length > 0 && !contentRisk && !originShift && !anyBlacklisted && !anyTor) {
+    // “Verified” is only claimed when live DNS authentication actually passed.
+    className = "verified-identity";
+  } else {
+    className = "unverified";
+  }
+
+  // A bit of context for the unverified case.
+  if (className === "unverified" && replyMismatch) {
+    drivers.push({ label: "Reply-to domain differs", detail: `Replies route to ${replyDomain} while the sender claims ${senderDomain}.`, severity: "medium" });
+  }
+  if (className === "unverified" && !originIp) {
+    drivers.push({ label: "Origin IP hidden", detail: "No disclosable origin IP — cannot tie the message to real infrastructure.", severity: "info" });
+  }
+  if (className === "malicious-actor" && replyMismatch) {
+    drivers.push({ label: "Reply-to domain differs", detail: `Replies route to ${replyDomain}, separate from the sender domain.`, severity: "medium" });
+  }
+  if (className === "anonymized-actor" && !contentRisk && !authFails.length) {
+    drivers.push({ label: "No attack content confirmed", detail: "Anonymization alone is not proof of malice — verify the content before acting.", severity: "info" });
+  }
+
+  const total = drivers.reduce((sum, flag) => sum + weight(flag.severity), 0);
+  let confidence = Math.max(40, Math.min(96, 42 + total));
+  if (className === "verified-identity") confidence = Math.max(confidence, 68);
+  if (className === "unverified") confidence = Math.min(confidence, 60);
+  const meta = attributionMeta[className];
+  return { className, label: meta.label, description: meta.description, confidence, drivers: drivers.slice(0, 8) };
+}
+
+/* ------------------------------------------------------------------ */
 /* Header & protocol forensics                                         */
 /* ------------------------------------------------------------------ */
 
