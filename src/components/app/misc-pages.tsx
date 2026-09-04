@@ -349,7 +349,7 @@ export function HealthPage({ scans }: { scans: StoredScan[] }) {
   );
 }
 
-export function SettingsPage({ scans, analyst, onAnalystChange, onLoadDemo, onClearAll, notify, onEnableAlerts }: { scans: StoredScan[]; analyst: string; onAnalystChange: (name: string) => void; onLoadDemo: () => Promise<void>; onClearAll: () => Promise<void>; notify: (msg: string) => void; onEnableAlerts: () => Promise<void> }) {
+export function SettingsPage({ scans, analyst, onAnalystChange, onLoadDemo, onClearAll, notify, onEnableAlerts, onSetRetention, retentionDays, onSetMasking, maskingEnabled }: { scans: StoredScan[]; analyst: string; onAnalystChange: (name: string) => void; onLoadDemo: () => Promise<void>; onClearAll: () => Promise<void>; notify: (msg: string) => void; onEnableAlerts: () => Promise<void>; onSetRetention: (days: number | null) => void; retentionDays: number | null; onSetMasking: (enabled: boolean) => void; maskingEnabled: boolean }) {
   return (
     <>
       <PageHeader title="Settings" description="Workspace identity and local evidence controls. All data lives in this browser only." />
@@ -365,6 +365,31 @@ export function SettingsPage({ scans, analyst, onAnalystChange, onLoadDemo, onCl
               placeholder="Enter your name (shown locally)"
               className="h-9 w-full border border-input bg-shell px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-brand"
             />
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Evidence retention" subtitle="Auto-delete local evidence older than a configurable window" />
+          <div className="p-5">
+            <div className="flex flex-wrap gap-2">
+              {[{ days: null, label: "Keep indefinitely" }, { days: 7, label: "7 days" }, { days: 30, label: "30 days" }, { days: 90, label: "90 days" }].map((option) => {
+                const active = (option.days ?? null) === retentionDays;
+                return (
+                  <button key={option.label} onClick={() => onSetRetention(option.days)} className={`border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider transition-colors ${active ? "border-brand bg-brand/15 text-brand" : "border-border text-muted-foreground hover:border-brand/40 hover:text-foreground"}`}>
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-[11px] leading-5 text-muted-foreground">{retentionDays === null ? "Retention off — records persist until removed manually." : `Scans older than ${retentionDays} days are removed automatically on the next load or setting change. Demo records are exempt, and every deletion is written to the chain-of-custody log.`}</p>
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Data masking" subtitle="Control how personal data appears in exported reports" />
+          <div className="p-5">
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant={maskingEnabled ? "default" : "outline"} onClick={() => onSetMasking(!maskingEnabled)}>{maskingEnabled ? "Masking on" : "Masking off"}</Button>
+              <span className="text-[11px] leading-5 text-muted-foreground">Email addresses in exported reports are masked (r***@bpitindia.com) while domains stay readable for analysis. Raw evidence and fingerprints are never altered.</span>
+            </div>
           </div>
         </Card>
         <Card>

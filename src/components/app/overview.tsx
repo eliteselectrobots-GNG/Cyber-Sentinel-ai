@@ -34,6 +34,7 @@ function TopSignals({ scans }: { scans: StoredScan[] }) {
 }
 import { severityCount, severityDistribution, campaignClusters } from "@/lib/stats";
 import { verifyEvidence, type StoredScan } from "@/lib/store";
+import { logAudit } from "@/lib/compliance";
 
 export function OverviewPage({ scans, openScanner, openCase, navigate, notify, loadDemo }: { scans: StoredScan[]; openScanner: () => void; openCase: (id: string) => void; navigate: (page: PageKey) => void; notify: (msg: string) => void; loadDemo: () => void }) {
   const distribution = severityDistribution(scans);
@@ -206,6 +207,7 @@ function LatestScanCard({ scan, scans, notify }: { scan: StoredScan; scans: Stor
     setVerifyState("checking");
     const { matches } = await verifyEvidence(scan.raw, scan.result.evidenceHash);
     setVerifyState(matches ? "ok" : "fail");
+    await logAudit(matches ? "integrity.verified" : "integrity.failed", scan.caseId);
     notify(matches ? `Integrity verified — fingerprint matches the stored evidence (${scan.caseId}).` : `Integrity check FAILED for ${scan.caseId}.`);
   };
 

@@ -25,8 +25,22 @@ export type StoredScan = {
 };
 
 const DB_NAME = "aegistrace-db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SCAN_STORE = "scans";
+const AUDIT_STORE = "audit";
+
+export type AuditEvent = {
+  /** Stable unique id (uuid). */
+  id: string;
+  /** Epoch ms when the action happened. */
+  at: number;
+  /** Analyst name captured at the time of the action. */
+  actor: string;
+  /** Machine action id, e.g. "case.scanned". */
+  action: string;
+  caseId?: string;
+  detail?: string;
+};
 
 let dbPromise: Promise<IDBDatabase> | undefined;
 
@@ -39,6 +53,10 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(SCAN_STORE)) {
         const store = db.createObjectStore(SCAN_STORE, { keyPath: "id" });
         store.createIndex("scannedAt", "scannedAt");
+      }
+      if (!db.objectStoreNames.contains(AUDIT_STORE)) {
+        const audit = db.createObjectStore(AUDIT_STORE, { keyPath: "id" });
+        audit.createIndex("at", "at");
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -91,6 +109,31 @@ export async function clearScans(): Promise<void> {
   const tx = db.transaction(SCAN_STORE, "readwrite");
   tx.objectStore(SCAN_STORE).clear();
   await transactionDone(tx);
+}
+
+export async function addAuditEvent(event: AuditEvent): Promise<void> {
+  try {
+    const db = await openDb();
+    const tx = db.transaction(AUDIT_STORE, "readwrite");
+    tx.objectStore(AUDIT_STORE).put(event);
+    await transactionDone(tx);
+  } catch {
+    // the audit log is best-effort and never blocks the main flow
+  }
+}
+
+export async function listAuditEvents(limit = 60): Promise<AuditEvent[]> {
+  try {
+    const db = await openDb();
+    const tx = db.transaction(AUDIT_STORE, "readonly");
+    const store = tx.objectStore(AUDIT_STORE);
+    const index = store.index("at");
+    const all = await requestToPromise(index.getAll() as IDBRequest<AuditEvent[]>);
+    await transactionDone(tx);
+    return all.sort((a, b) => b.at - a.at).slice(0, limit);
+  } catch {
+    return [];
+  }
 }
 
 export async function countScans(): Promise<number> {

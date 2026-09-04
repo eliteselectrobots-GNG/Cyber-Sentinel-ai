@@ -1,7 +1,8 @@
-import { Fingerprint, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { Fingerprint, History, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { verifyEvidence, type StoredScan } from "@/lib/store";
+import { verifyEvidence, listAuditEvents, type AuditEvent, type StoredScan } from "@/lib/store";
+import { logAudit, auditActionLabels } from "@/lib/compliance";
 import { Card, DemoTag, EmptyState, IntegrityBadge, PageHeader, SeverityBadge, timeAgo, type PageKey } from "./ui";
 
 export function EvidenceVaultPage({ scans, onDelete, navigate, notify }: { scans: StoredScan[]; onDelete: (id: string) => void; navigate: (page: PageKey) => void; notify: (msg: string) => void }) {
@@ -21,7 +22,42 @@ export function EvidenceVaultPage({ scans, onDelete, navigate, notify }: { scans
           {scans.map((scan) => <VaultRow key={scan.id} scan={scan} onDelete={onDelete} notify={notify} />)}
         </div>
       )}
+      <AuditLogPanel scans={scans} />
     </>
+  );
+}
+
+function AuditLogPanel({ scans }: { scans: StoredScan[] }) {
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  useEffect(() => {
+    void listAuditEvents(40).then(setEvents);
+  }, [scans.length]);
+  if (events.length === 0) return null;
+  return (
+    <Card className="mt-6">
+      <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+        <div>
+          <div className="flex items-center gap-2"><History className="size-4 text-brand" /><h3 className="font-display text-base font-semibold">Chain-of-custody log</h3></div>
+          <p className="mt-1 text-xs text-muted-foreground">Who acted on this evidence, when, and on which case — append-only in this browser. Deletions are recorded, not erased.</p>
+        </div>
+        <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{events.length} events</span>
+      </div>
+      <div className="divide-y divide-border">
+        {events.map((event) => (
+          <div key={event.id} className="flex items-start gap-3 p-3.5">
+            <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-brand" />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <p className="text-xs font-medium text-foreground">{auditActionLabels[event.action] ?? event.action}</p>
+                {event.caseId && <span className="font-mono text-[9px] text-brand">{event.caseId}</span>}
+                {event.detail && <span className="text-[11px] text-muted-foreground">— {event.detail}</span>}
+              </div>
+              <p className="mt-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{new Date(event.at).toLocaleString()} · {event.actor}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -32,6 +68,7 @@ function VaultRow({ scan, onDelete, notify }: { scan: StoredScan; onDelete: (id:
     setVerifyState("checking");
     const { matches } = await verifyEvidence(scan.raw, scan.result.evidenceHash);
     setVerifyState(matches ? "ok" : "fail");
+    await logAudit(matches ? "integrity.verified" : "integrity.failed", scan.caseId);
     notify(matches ? `Integrity verified for ${scan.caseId}.` : `Integrity check FAILED for ${scan.caseId}.`);
   };
 

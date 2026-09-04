@@ -8,6 +8,7 @@ import type { StoredScan } from "./store";
 import { extractIocs } from "./iocs";
 import { flagEmoji, locationLabel } from "./geo";
 import { classifyEmail, attributionOf, classMeta, getOrgDomain, headerForensics, type AnalysisFlag } from "./advanced";
+import { logAudit, maskAddress } from "./compliance";
 
 const esc = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -41,6 +42,7 @@ export function buildHtmlReport(scan: StoredScan, scans: StoredScan[]): string {
   const iocs = extractIocs(scan.raw, r);
   const intel = scan.domainIntel ?? {};
   const scanned = new Date(scan.scannedAt);
+  const m = maskAddress;
 
   const reversed = [...r.hops];
   if (reversed[0]?.status === "relay" && reversed.at(-1)?.status === "origin") reversed.reverse();
@@ -86,15 +88,15 @@ export function buildHtmlReport(scan: StoredScan, scans: StoredScan[]): string {
 
   const iocHtml = iocs.length
     ? `<table><thead><tr><th>Type</th><th>Value</th><th>Source</th></tr></thead><tbody>${iocs
-        .map((ioc) => `<tr><td class="mono">${esc(ioc.type)}</td><td class="mono">${esc(ioc.value)}</td><td class="muted">${esc(ioc.source)}</td></tr>`)
+        .map((ioc) => `<tr><td class="mono">${esc(ioc.type)}</td><td class="mono">${esc(ioc.type === "Email" ? m(ioc.value) : ioc.value)}</td><td class="muted">${esc(ioc.source)}</td></tr>`)
         .join("")}</tbody></table>`
     : '<p class="muted">No indicators extracted.</p>';
 
   const summaryHtml =
     `<p style="font-size:13px;margin:0 0 10px 0;"><b>${esc(r.subject)}</b></p>` +
-    kv("From", `${r.sender} <${r.senderAddress}>`) +
-    kv("Reply-To", r.replyTo) +
-    kv("Return-Path", r.returnPath) +
+    kv("From", `${r.sender} <${m(r.senderAddress)}>`) +
+    kv("Reply-To", m(r.replyTo)) +
+    kv("Return-Path", m(r.returnPath)) +
     kv("Date", r.receivedAt) +
     kv("Headers parsed", `${r.headersFound} values · ${r.hops.length} relay hop(s)`) +
     (iocs.length ? kv("Indicators", `${iocs.length} extracted (${iocs.filter((ioc) => ioc.type === "IP").length} IP · ${iocs.filter((ioc) => ioc.type === "URL").length} URL)`) : "");
@@ -159,6 +161,7 @@ export function buildHtmlReport(scan: StoredScan, scans: StoredScan[]): string {
 /** Opens the report in a new tab; falls back to downloading the .html file. */
 export function openHtmlReport(scan: StoredScan, scans: StoredScan[]): void {
   const html = buildHtmlReport(scan, scans);
+  void logAudit("report.exported", scan.caseId, "HTML report");
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const opened = window.open(url, "_blank");

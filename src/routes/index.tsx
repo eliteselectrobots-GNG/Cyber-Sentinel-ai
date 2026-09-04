@@ -8,6 +8,7 @@ import { buildDemoDataset } from "@/lib/demo-data";
 import { enrichWithDns } from "@/lib/dns";
 import { enrichIps, flagEmoji, locationLabel } from "@/lib/geo";
 import { enrichIpInfra, lookupDomainIntel } from "@/lib/infra";
+import { applyRetention, logAudit, setRetentionDays, setMaskingEnabled, getRetentionDays, getMaskingEnabled } from "@/lib/compliance";
 import type { EmailScanResult } from "@/lib/email-scanner";
 import { ScannerDialog } from "@/components/app/scanner-dialog";
 import { OverviewPage } from "@/components/app/overview";
@@ -77,8 +78,12 @@ function AegisTraceShell() {
   const mounted = useRef(false);
 
   const reload = async () => {
-    const stored = await listScans();
+    let stored = await listScans();
+    // Configurable retention: silently sweep records older than the window.
+    const removed = await applyRetention(stored, deleteScan);
+    if (removed > 0) stored = await listScans();
     setScans(stored);
+    return removed;
   };
 
   useEffect(() => {
@@ -154,6 +159,7 @@ function AegisTraceShell() {
       // domain intelligence is best-effort; the scan itself always succeeds
     }
     await addScan(stored);
+    await logAudit("case.scanned", stored.caseId, `${result.riskLabel} risk ${result.riskScore}/100 · ${result.headersFound} headers parsed`);
     await reload();
     navigate("overview");
     const failures = (stored.auth?.checks ?? []).filter((check) => check.outcome === "fail").length;
@@ -193,6 +199,8 @@ function AegisTraceShell() {
 
   const handleDelete = async (id: string) => {
     await deleteScan(id);
+    const caseId = scans.find((scan) => scan.id === id)?.caseId;
+    await logAudit("case.deleted", caseId);
     if (selectedCase === id) setSelectedCase(null);
     await reload();
     notify("Case removed from local evidence.");
@@ -203,6 +211,7 @@ function AegisTraceShell() {
     await clearScans();
     const dataset = await buildDemoDataset();
     for (const scan of dataset) await addScan(scan);
+    await logAudit("demo.loaded", undefined, `${dataset.length} records loaded`);
     await reload();
     notify(`Demo dataset loaded — ${dataset.length} records, each processed by the real engine.`);
   };
@@ -210,10 +219,23 @@ function AegisTraceShell() {
   const handleClearAll = async () => {
     if (scans.length === 0) return;
     if (!window.confirm("Delete ALL locally stored evidence? This cannot be undone.")) return;
+    await logAudit("evidence.cleared", undefined, `${scans.length} record(s) cleared`);
     await clearScans();
     setSelectedCase(null);
     await reload();
     notify("All local evidence cleared.");
+  };
+
+  const handleSetRetention = async (days: number | null) => {
+    setRetentionDays(days);
+    const removed = await applyRetention(scans, deleteScan);
+    if (removed > 0) await reload();
+    notify(days === null ? "Retention off — evidence is kept indefinitely." : removed > 0 ? `${removed} expired record${removed === 1 ? "" : "s"} auto-deleted (older than ${days} days).` : `Retention set to ${days} day${days === 1 ? "" : "s"}.`);
+  };
+
+  const handleSetMasking = (enabled: boolean) => {
+    setMaskingEnabled(enabled);
+    notify(enabled ? "Masking enabled — exported reports mask email addresses." : "Masking disabled — reports show full addresses.");
   };
 
   const handleAnalystChange = (name: string) => {
@@ -242,7 +264,7 @@ function AegisTraceShell() {
       case "health":
         return <HealthPage scans={scans} />;
       case "settings":
-        return <SettingsPage scans={scans} analyst={analyst} onAnalystChange={handleAnalystChange} onLoadDemo={handleLoadDemo} onClearAll={handleClearAll} notify={notify} onEnableAlerts={() => handleEnableAlerts()} />;
+        return <SettingsPage scans={scans} analyst={analyst} onAnalystChange={handleAnalystChange} onLoadDemo={handleLoadDemo} onClearAll={handleClearAll} notify={notify} onEnableAlerts={() => handleEnableAlerts()} onSetRetention={(days) => void handleSetRetention(days)} retentionDays={getRetentionDays()} onSetMasking={(enabled) => handleSetMasking(enabled)} maskingEnabled={getMaskingEnabled()} />;
     }
   };
 

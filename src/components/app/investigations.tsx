@@ -9,18 +9,20 @@ import { DemoTag, EmptyState, GeoLine, InfraChips, IntegrityBadge, PageHeader, S
 import { ClassTag } from "./ui";
 import { classifyEmail, classMeta, getOrgDomain, headerForensics, attributionOf, type AnalysisFlag, type Classification } from "@/lib/advanced";
 import { openHtmlReport } from "@/lib/html-report";
+import { logAudit, maskAddress } from "@/lib/compliance";
 
 function downloadReport(scan: StoredScan) {
   const iocs = extractIocs(scan.raw, scan.result);
+  const m = (value: string) => maskAddress(value);
   const lines = [
     `AEGISTRACE — FORENSIC CASE REPORT`,
     `=================================`,
     `Case id:      ${scan.caseId}`,
     `Scanned at:   ${new Date(scan.scannedAt).toISOString()}`,
     `Subject:      ${scan.result.subject}`,
-    `From:         ${scan.result.sender} <${scan.result.senderAddress}>`,
-    `Reply-To:     ${scan.result.replyTo}`,
-    `Return-Path:  ${scan.result.returnPath}`,
+    `From:         ${scan.result.sender} <${m(scan.result.senderAddress)}>`,
+    `Reply-To:     ${m(scan.result.replyTo)}`,
+    `Return-Path:  ${m(scan.result.returnPath)}`,
     `Date:         ${scan.result.receivedAt}`,
     `Risk score:   ${scan.result.riskScore}/100 (${scan.result.riskLabel})`,
     ``,
@@ -37,7 +39,7 @@ function downloadReport(scan: StoredScan) {
     ``,
     `INDICATORS OF COMPROMISE`,
     `------------------------`,
-    ...iocs.map((ioc) => `${ioc.type.toUpperCase()}\t${ioc.value}\t(${ioc.source})`),
+    ...iocs.map((ioc) => `${ioc.type.toUpperCase()}\t${ioc.type === "Email" ? m(ioc.value) : ioc.value}\t(${ioc.source})`),
     ``,
     `EVIDENCE`,
     `--------`,
@@ -55,6 +57,7 @@ function downloadReport(scan: StoredScan) {
   anchor.download = `${scan.caseId}-forensic-report.txt`;
   anchor.click();
   URL.revokeObjectURL(url);
+  void logAudit("report.exported", scan.caseId, "text report");
 }
 
 type DetailTab = "Detection" | "Overview" | "Header analysis" | "Origin map" | "IoCs" | "Timeline" | "Body";
@@ -136,6 +139,7 @@ function CaseDetail({ scan, scans, onSelect, onDelete, notify }: { scan: StoredS
     setVerifyState("checking");
     const { matches } = await verifyEvidence(scan.raw, scan.result.evidenceHash);
     setVerifyState(matches ? "ok" : "fail");
+    await logAudit(matches ? "integrity.verified" : "integrity.failed", scan.caseId);
     notify(matches ? `Integrity verified for ${scan.caseId}.` : `Integrity check FAILED for ${scan.caseId}.`);
   };
 
