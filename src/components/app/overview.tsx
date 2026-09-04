@@ -1,14 +1,42 @@
 import { AlertTriangle, ArrowUpRight, CheckCircle2, ChevronRight, Database, Fingerprint, Globe2, MailWarning, Network, RefreshCw, Server, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { timeAgo, Bar, Card, CardHeader, DemoTag, DotLegend, EmptyState, PageHeader, SeverityBadge, Stat, type PageKey } from "./ui";
+
+const severityColors: Record<string, string> = { Critical: "#e5484d", High: "#e2c04c", Medium: "#35c7c0", Low: "#53d88a" };
+const signalTone: Record<string, string> = { critical: "bg-status-critical", high: "bg-status-warning", medium: "bg-brand", info: "bg-brand" };
+
+function TopSignals({ scans }: { scans: StoredScan[] }) {
+  const frequency = useMemo(() => {
+    const map = new Map<string, { count: number; severity: string }>();
+    for (const scan of scans) {
+      for (const finding of scan.result.findings) {
+        if (finding.severity === "info") continue;
+        const entry = map.get(finding.label) ?? { count: 0, severity: finding.severity };
+        entry.count += 1;
+        map.set(finding.label, entry);
+      }
+    }
+    return [...map.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 5);
+  }, [scans]);
+  const max = Math.max(1, ...frequency.map(([, entry]) => entry.count));
+  if (frequency.length === 0) return null;
+  return (
+    <div className="space-y-3 border-t border-border pt-5">
+      <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Top detected signals</p>
+      {frequency.map(([label, entry]) => (
+        <Bar key={label} label={label} value={String(entry.count)} pct={(entry.count / max) * 100} tone={signalTone[entry.severity] ?? "bg-brand"} />
+      ))}
+    </div>
+  );
+}
 import { severityCount, severityDistribution, campaignClusters } from "@/lib/stats";
 import { verifyEvidence, type StoredScan } from "@/lib/store";
 
 export function OverviewPage({ scans, openScanner, openCase, navigate, notify }: { scans: StoredScan[]; openScanner: () => void; openCase: (id: string) => void; navigate: (page: PageKey) => void; notify: (msg: string) => void }) {
   const distribution = severityDistribution(scans);
-  const total = Math.max(1, scans.length);
   const latest = scans[0];
   const clusters = campaignClusters(scans).filter((c) => c.count >= 2);
 
@@ -71,18 +99,33 @@ export function OverviewPage({ scans, openScanner, openCase, navigate, notify }:
             <EmptyState title="Nothing to measure yet" detail="Run a few scans and the severity distribution will appear here." />
           ) : (
             <div className="space-y-5 p-5">
-              <div className="space-y-3">
-                <DotLegend color="bg-status-critical" label="Critical" value={String(distribution.Critical)} />
-                <DotLegend color="bg-status-warning" label="High" value={String(distribution.High)} />
-                <DotLegend color="bg-brand" label="Medium" value={String(distribution.Medium)} />
-                <DotLegend color="bg-muted-foreground/40" label="Low / clean" value={String(distribution.Low)} />
+              <div className="flex items-center gap-6">
+                <div className="relative size-36 shrink-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={[
+                        { name: "Critical", value: distribution.Critical, fill: severityColors["Critical"] },
+                        { name: "High", value: distribution.High, fill: severityColors["High"] },
+                        { name: "Medium", value: distribution.Medium, fill: severityColors["Medium"] },
+                        { name: "Low", value: distribution.Low, fill: severityColors["Low"] },
+                      ]} dataKey="value" nameKey="name" innerRadius={46} outerRadius={64} paddingAngle={2} strokeWidth={0}>
+                        {(["Critical", "High", "Medium", "Low"] as const).map((key) => <Cell key={key} fill={severityColors[key]} />)}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <p className="font-display text-xl font-semibold text-foreground">{scans.length}</p>
+                    <p className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground">scans</p>
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1 space-y-3">
+                  <DotLegend color="bg-status-critical" label="Critical" value={String(distribution.Critical)} />
+                  <DotLegend color="bg-status-warning" label="High" value={String(distribution.High)} />
+                  <DotLegend color="bg-brand" label="Medium" value={String(distribution.Medium)} />
+                  <DotLegend color="bg-muted-foreground/40" label="Low / clean" value={String(distribution.Low)} />
+                </div>
               </div>
-              <div className="space-y-3 border-t border-border pt-5">
-                <Bar label="Critical" value={`${distribution.Critical} · ${Math.round((distribution.Critical / total) * 100)}%`} pct={(distribution.Critical / total) * 100} tone="bg-status-critical" />
-                <Bar label="High" value={`${distribution.High} · ${Math.round((distribution.High / total) * 100)}%`} pct={(distribution.High / total) * 100} tone="bg-status-warning" />
-                <Bar label="Medium" value={`${distribution.Medium} · ${Math.round((distribution.Medium / total) * 100)}%`} pct={(distribution.Medium / total) * 100} tone="bg-brand" />
-                <Bar label="Low / clean" value={`${distribution.Low} · ${Math.round((distribution.Low / total) * 100)}%`} pct={(distribution.Low / total) * 100} tone="bg-status-safe" />
-              </div>
+              <TopSignals scans={scans} />
             </div>
           )}
         </Card>
