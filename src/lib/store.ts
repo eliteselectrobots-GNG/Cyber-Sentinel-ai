@@ -87,6 +87,15 @@ export async function addScan(scan: StoredScan): Promise<void> {
   await transactionDone(tx);
 }
 
+/** Returns a single stored scan, or undefined when it no longer exists. */
+export async function findScan(id: string): Promise<StoredScan | undefined> {
+  const db = await openDb();
+  const tx = db.transaction(SCAN_STORE, "readonly");
+  const found = await requestToPromise(tx.objectStore(SCAN_STORE).get(id) as IDBRequest<StoredScan | undefined>);
+  await transactionDone(tx);
+  return found;
+}
+
 export async function listScans(): Promise<StoredScan[]> {
   const db = await openDb();
   const tx = db.transaction(SCAN_STORE, "readonly");

@@ -103,16 +103,18 @@ export async function lookupGeo(ip: string): Promise<GeoInfo | null> {
 }
 
 /**
- * Looks up a list of IPs (deduped, public-only, capped) sequentially so
- * the free tier is treated politely. Returns only the successful hits.
+ * Looks up a list of IPs (deduped, public-only, capped) in small parallel
+ * batches so relay paths resolve quickly without hammering the free tier.
+ * Returns only the successful hits.
  */
 export async function enrichIps(ips: string[]): Promise<Record<string, GeoInfo>> {
-  const unique = [...new Set(ips.map((ip) => ip.trim()).filter(Boolean))].filter(isPublicIpv4).slice(0, 10);
+  const unique = [...new Set(ips.map((ip) => ip.trim()).filter(Boolean))].filter(isPublicIpv4).slice(0, 8);
   const found: Record<string, GeoInfo> = {};
-  for (const ip of unique) {
-    const info = await lookupGeo(ip);
-    if (info) found[info.ip] = info;
-    await new Promise((resolve) => setTimeout(resolve, 120));
+  const BATCH = 4;
+  for (let i = 0; i < unique.length; i += BATCH) {
+    const batch = unique.slice(i, i + BATCH);
+    const results = await Promise.all(batch.map((ip) => lookupGeo(ip)));
+    for (const info of results) if (info) found[info.ip] = info;
   }
   return found;
 }

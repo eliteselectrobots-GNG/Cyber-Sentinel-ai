@@ -144,16 +144,26 @@ async function checkDmarc(domain: string): Promise<AuthCheck> {
 const DKIM_SELECTORS = ["default", "google", "selector1", "selector2", "s1", "s2", "k1", "k2", "mail", "2024", "2025"];
 
 async function checkDkim(domain: string): Promise<AuthCheck> {
-  for (const selector of DKIM_SELECTORS) {
-    const answers = await queryDns(`${selector}._domainkey.${domain}`, "TXT");
-    const record = answers.map(txtRecord).find((txt) => txt.toLowerCase().includes("v=dkim1"));
-    if (record) {
-      const dTag = /(?:^|;)\s*d=([^\s;]+)/i.exec(record)?.[1];
-      const aligned = !dTag || dTag.toLowerCase() === domain;
-      return aligned
-        ? { kind: "DKIM", domain, outcome: "pass", detail: `DKIM key published for selector "${selector}" on ${domain}.` }
-        : { kind: "DKIM", domain, outcome: "softfail", detail: `DKIM key found under "${selector}" but d=${dTag} does not match ${domain}.` };
-    }
+  // Probe all common selectors in parallel so a domain without DKIM keys
+  // resolves in roughly one round-trip instead of one query per selector.
+  const probed = await Promise.all(
+    DKIM_SELECTORS.map(async (selector): Promise<{ selector: string; record: string } | null> => {
+      try {
+        const answers = await queryDns(`${selector}._domainkey.${domain}`, "TXT");
+        const record = answers.map(txtRecord).find((txt) => txt.toLowerCase().includes("v=dkim1"));
+        return record ? { selector, record } : null;
+      } catch {
+        return null;
+      }
+    })
+  );
+  const found = probed.find((entry): entry is { selector: string; record: string } => entry !== null);
+  if (found) {
+    const dTag = /(?:^|;)\s*d=([^\s;]+)/i.exec(found.record)?.[1];
+    const aligned = !dTag || dTag.toLowerCase() === domain;
+    return aligned
+      ? { kind: "DKIM", domain, outcome: "pass", detail: `DKIM key published for selector "${found.selector}" on ${domain}.` }
+      : { kind: "DKIM", domain, outcome: "softfail", detail: `DKIM key found under "${found.selector}" but d=${dTag} does not match ${domain}.` };
   }
   return { kind: "DKIM", domain, outcome: "notfound", detail: `No DKIM key found for common selectors on ${domain}.` };
 }
@@ -189,23 +199,17 @@ export async function enrichWithDns(sender: string, replyTo: string, returnPath:
     };
   }
 
+  // SPF, DMARC, and DKIM are independent of each other — run them concurrently
+  // so authentication resolves in roughly one network round-trip.
   const checks: AuthCheck[] = [];
-  try {
-    const spf = await evaluateSpf(senderDomain, originIp ?? "");
-    checks.push({ kind: "SPF", domain: senderDomain, outcome: spf.outcome, detail: spf.detail });
-  } catch {
-    checks.push({ kind: "SPF", domain: senderDomain, outcome: "error", detail: `SPF lookup failed for ${senderDomain} (DNS error).` });
-  }
-  try {
-    checks.push(await checkDmarc(senderDomain));
-  } catch {
-    checks.push({ kind: "DMARC", domain: senderDomain, outcome: "error", detail: `DMARC lookup failed for ${senderDomain} (DNS error).` });
-  }
-  try {
-    checks.push(await checkDkim(senderDomain));
-  } catch {
-    checks.push({ kind: "DKIM", domain: senderDomain, outcome: "error", detail: `DKIM lookup failed for ${senderDomain} (DNS error).` });
-  }
+  const [spf, dmarc, dkim] = await Promise.all([
+    evaluateSpf(senderDomain, originIp ?? "")
+      .then((spfResult) => ({ kind: "SPF", domain: senderDomain, outcome: spfResult.outcome, detail: spfResult.detail } as AuthCheck))
+      .catch(() => ({ kind: "SPF", domain: senderDomain, outcome: "error", detail: `SPF lookup failed for ${senderDomain} (DNS error).` } as AuthCheck)),
+    checkDmarc(senderDomain).catch(() => ({ kind: "DMARC", domain: senderDomain, outcome: "error", detail: `DMARC lookup failed for ${senderDomain} (DNS error).` } as AuthCheck)),
+    checkDkim(senderDomain).catch(() => ({ kind: "DKIM", domain: senderDomain, outcome: "error", detail: `DKIM lookup failed for ${senderDomain} (DNS error).` } as AuthCheck)),
+  ]);
+  checks.push(spf, dmarc, dkim);
 
   const replyDomain = domainOfAddress(replyTo);
   if (replyDomain && replyDomain !== senderDomain) {

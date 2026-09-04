@@ -43,8 +43,13 @@ export function ScannerDialog({
     try {
       const result = await scanEmail(scanInput);
       onResult(scanInput, result);
-      onOpenChange(false);
-      reset();
+      // Close on the next tick: the verdict now saves almost instantly, and
+      // closing synchronously mid-click would let the mouse-up fall through
+      // to the button beneath and immediately reopen the dialog.
+      window.setTimeout(() => {
+        onOpenChange(false);
+        reset();
+      }, 120);
     } catch (error) {
       setScanError(error instanceof Error ? error.message : "The email could not be scanned.");
     } finally {
