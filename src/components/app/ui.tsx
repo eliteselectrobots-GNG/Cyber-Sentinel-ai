@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Inbox, ShieldCheck, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Inbox, Server, ShieldAlert, ShieldCheck, XCircle, type LucideIcon } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import { flagEmoji, locationLabel, type GeoInfo } from "@/lib/geo";
 import { classifyEmail, classMeta, getOrgDomain } from "@/lib/advanced";
@@ -158,6 +158,34 @@ export function ClassTag({ scan, scans }: { scan: StoredScan; scans: StoredScan[
   const detection = useMemo(() => classifyEmail(scan, scans, getOrgDomain()), [scan, scans]);
   const meta = classMeta[detection.className];
   return <span className={`inline-flex items-center border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${classTone[meta.tone]}`}>{meta.label}</span>;
+}
+
+/** Live infrastructure chips for one hop IP: Tor exit, blacklist hits, cloud hosting. */
+export function InfraChips({ scan, ip }: { scan: StoredScan; ip: string }) {
+  const infra = scan.infra?.[ip];
+  if (!infra || (!infra.torExit && !infra.cloudHosting && infra.blacklists.length === 0)) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {infra.torExit && (
+        <span title="Listed as a live Tor exit relay by Tor Project DNSEL or relay-operator ASN fingerprint" className="inline-flex items-center gap-1 border border-status-warning/40 bg-status-warning/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider text-status-warning">
+          <ShieldAlert className="size-2.5" />Tor exit relay
+        </span>
+      )}
+      {infra.blacklists.map((hit) => (
+        <span key={hit.list} title={`${hit.meaning} — resolved live from ${hit.list}`} className="inline-flex items-center gap-1 border border-status-critical/40 bg-status-critical/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider text-status-critical">
+          <Ban className="size-2.5" />Blacklisted · {hit.list}
+        </span>
+      ))}
+      {infra.cloudHosting && (
+        <span title="ISP/ASN fingerprint matches a cloud or datacenter hosting provider — rented infrastructure, not residential broadband" className="inline-flex items-center gap-1 border border-brand/40 bg-brand/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider text-brand">
+          <Server className="size-2.5" />Cloud / datacenter host
+        </span>
+      )}
+      {infra.source === "demo" && (
+        <span className="inline-flex items-center border border-border bg-shell px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider text-muted-foreground">demo</span>
+      )}
+    </div>
+  );
 }
 
 export function timeAgo(timestamp: number): string {

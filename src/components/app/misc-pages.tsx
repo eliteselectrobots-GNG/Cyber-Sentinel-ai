@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { campaignClusters, originIpOf } from "@/lib/stats";
 import type { StoredScan } from "@/lib/store";
-import { Card, CardHeader, EmptyState, GeoLine, PageHeader, timeAgo, type PageKey } from "./ui";
+import { Card, CardHeader, EmptyState, GeoLine, InfraChips, PageHeader, timeAgo, type PageKey } from "./ui";
 
 export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navigate: (page: PageKey) => void }) {
   const latest = scans[0];
@@ -44,6 +44,7 @@ export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navig
                         </div>
                         <p className={`mt-1 font-mono text-xs ${hop.ip === "Not disclosed" ? "text-muted-foreground" : "text-foreground"}`}>{hop.ip}</p>
                         {hopGeo ? <div className="mt-1"><GeoLine geo={hopGeo} /></div> : <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{hop.detail}</p>}
+                        {latest && <InfraChips scan={latest} ip={hop.ip} />}
                       </div>
                     </div>
                   );
@@ -63,6 +64,7 @@ export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navig
                       <p className="truncate text-xs font-medium text-foreground">{scan.result.subject}</p>
                       <p className="mt-1 font-mono text-[9px] text-muted-foreground">{scan.caseId} · {timeAgo(scan.scannedAt)}</p>
                       {originGeo && <p className="mt-1"><GeoLine geo={originGeo} compact /></p>}
+                      {originIp && <InfraChips scan={scan} ip={originIp} />}
                     </div>
                     <p className={`max-w-40 truncate font-mono text-xs ${originIp ? "text-foreground" : "text-muted-foreground"}`}>{originIp ?? "Not disclosed"}</p>
                   </div>
@@ -134,7 +136,13 @@ const engineSignals = [
   { name: ".eml intake (≤1 MB)", status: true, note: "Local file ingestion" },
   { name: "DNS-level SPF/DKIM/DMARC verification", status: true, note: "Live · DNS-over-HTTPS" },
   { name: "IP geolocation & ASN attribution", status: true, note: "Live · city-level, per hop" },
-  { name: "IP reputation / threat feeds", status: false, note: "Phase 2 · server (Spamhaus DNSBL is free via DoH — can add now)" },
+  { name: "Tor exit detection", status: true, note: "Live · Tor Project DNSEL + relay-operator fingerprints" },
+  { name: "DNS blacklist reputation", status: true, note: "Live · Spamhaus ZEN + SpamCop via DoH" },
+  { name: "Cloud / datacenter hosting flags", status: true, note: "ASN org / ISP fingerprints" },
+  { name: "Header & protocol forensics", status: true, note: "Message-ID · Date · envelope · header-vs-live-DNS conflicts" },
+  { name: "MX record verification", status: true, note: "Live · DNS-over-HTTPS" },
+  { name: "WHOIS / registrar intelligence", status: true, note: "Live · RDAP (registration date, registrar)" },
+  { name: "Commercial threat feeds", status: false, note: "Phase 2 · server (VirusTotal / AbuseIPDB need API keys)" },
   { name: "Audio transcription", status: false, note: "Phase 2 · server (needs AI API key)" },
   { name: "Organization-specific RAG", status: false, note: "Phase 2 · server (needs LLM API key)" },
 ];

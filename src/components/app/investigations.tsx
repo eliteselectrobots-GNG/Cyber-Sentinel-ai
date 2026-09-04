@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button";
 import { verifyEvidence, type StoredScan } from "@/lib/store";
 import { extractIocs, iocTotals, relatedCases, type IoC } from "@/lib/iocs";
 import { distanceKm, flagEmoji, locationLabel, type GeoInfo } from "@/lib/geo";
-import { DemoTag, EmptyState, GeoLine, IntegrityBadge, PageHeader, SeverityBadge, timeAgo, type PageKey } from "./ui";
+import { DemoTag, EmptyState, GeoLine, InfraChips, IntegrityBadge, PageHeader, SeverityBadge, timeAgo, type PageKey } from "./ui";
 import { ClassTag } from "./ui";
-import { classifyEmail, classMeta, getOrgDomain, type AnalysisFlag, type Classification } from "@/lib/advanced";
+import { classifyEmail, classMeta, getOrgDomain, headerForensics, type AnalysisFlag, type Classification } from "@/lib/advanced";
 
 function downloadReport(scan: StoredScan) {
   const iocs = extractIocs(scan.raw, scan.result);
@@ -261,8 +261,70 @@ function HeaderAnalysis({ scan }: { scan: StoredScan }) {
           <pre className="max-h-[420px] overflow-auto border border-border bg-shell p-3 font-mono text-[10px] leading-5 text-foreground">{rawHeaderBlock}</pre>
         </div>
       </div>
+      <HeaderForensicsBlock scan={scan} />
       <AuthChecks scan={scan} />
+      <DomainIntelBlock scan={scan} />
     </>
+  );
+}
+
+function HeaderForensicsBlock({ scan }: { scan: StoredScan }) {
+  const flags = useMemo(() => headerForensics(scan), [scan]);
+  return <EvidenceBlock title="Header & protocol forensics" items={flags} emptyText="No protocol anomalies detected — headers are structurally consistent." />;
+}
+
+function DomainIntelBlock({ scan }: { scan: StoredScan }) {
+  const intel = scan.domainIntel ?? {};
+  const keys = Object.keys(intel);
+  if (keys.length === 0) {
+    return (
+      <div className="border border-border bg-shell/60 p-3 text-[11px] leading-5 text-muted-foreground">
+        Domain intelligence (MX records + WHOIS registration) is resolved at scan time — re-run this scan while online to capture it.
+      </div>
+    );
+  }
+  const yearsSince = (iso: string) => {
+    const age = Date.now() - new Date(iso).getTime();
+    if (Number.isNaN(age)) return "";
+    const days = Math.floor(age / 86400e3);
+    return days < 730 ? `${Math.max(0, Math.floor(days / 30))} months old` : `${(days / 365).toFixed(1)} years old`;
+  };
+  return (
+    <div className="mt-6">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Domain intelligence · MX + WHOIS</p>
+        <span className="font-mono text-[9px] uppercase tracking-wider text-status-safe">Resolved live at scan time</span>
+      </div>
+      <div className="divide-y divide-border border border-border">
+        {keys.map((domain) => {
+          const record = intel[domain];
+          if (!record) return null;
+          const demo = record.source === "demo";
+          return (
+            <div key={domain} className="p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="break-all font-mono text-xs font-semibold text-foreground">{domain}</span>
+                {demo && <span className="border border-brand/40 bg-brand/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider text-brand">demo</span>}
+                {record.whois ? (
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Registrar: {record.whois.registrar}{record.whois.created ? ` · registered ${yearsSince(record.whois.created) || new Date(record.whois.created).toLocaleDateString()}` : ""}</span>
+                ) : (
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">No public WHOIS record</span>
+                )}
+              </div>
+              {record.mx.length > 0 ? (
+                <div className="mt-1.5 space-y-0.5">
+                  {record.mx.slice(0, 4).map((entry) => (
+                    <p key={entry} className="break-all font-mono text-[10px] text-muted-foreground">{entry}</p>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">No MX records — this domain cannot receive mail directly.</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -359,6 +421,7 @@ function OriginMapTab({ scan }: { scan: StoredScan }) {
                 {geo ? (
                   <div className="mt-1.5 space-y-1">
                     <GeoLine geo={geo} />
+                    <InfraChips scan={scan} ip={hop.ip} />
                     <p className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
                       {geo.lat !== 0 && <span>{geo.lat.toFixed(4)}, {geo.lon.toFixed(4)}</span>}
                       {geo.isp && <span>{geo.isp}</span>}
@@ -461,7 +524,12 @@ function IocTab({ iocs, scan }: { iocs: IoC[]; scan: StoredScan }) {
               <Icon className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0">
                 <p className="break-all font-mono text-xs text-foreground">{ioc.value}</p>
-                {iocGeo && <p className="mt-1.5"><GeoLine geo={iocGeo} compact /></p>}
+                {iocGeo && (
+                  <p className="mt-1.5">
+                    <GeoLine geo={iocGeo} compact />
+                    <InfraChips scan={scan} ip={ioc.value} />
+                  </p>
+                )}
                 <p className="mt-1 font-mono text-[9px] uppercase tracking-wider opacity-70">{ioc.type} · {ioc.source}</p>
               </div>
             </div>

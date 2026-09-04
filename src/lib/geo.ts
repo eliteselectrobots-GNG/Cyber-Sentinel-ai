@@ -22,6 +22,8 @@ export type GeoInfo = {
   isp: string;
   org: string;
   asn: string;
+  /** The domain registered to the ASN/operator (e.g. relayon.org for Tor exits). */
+  ispDomain?: string;
   /** "live" = resolved from a real lookup; "demo" = part of the demo dataset. */
   source: "live" | "demo";
 };
@@ -72,7 +74,7 @@ export async function lookupGeo(ip: string): Promise<GeoInfo | null> {
       city?: string;
       latitude?: number;
       longitude?: number;
-      connection?: { asn?: number; org?: string; isp?: string };
+      connection?: { asn?: number; org?: string; isp?: string; domain?: string };
     };
     if (!data || data.success === false) {
       cache.set(ip, null);
@@ -91,6 +93,7 @@ export async function lookupGeo(ip: string): Promise<GeoInfo | null> {
       asn: data.connection?.asn ? `AS${data.connection.asn}` : "",
       source: "live",
     };
+    if (data.connection?.domain) info.ispDomain = data.connection.domain;
     cache.set(ip, info);
     return info;
   } catch {

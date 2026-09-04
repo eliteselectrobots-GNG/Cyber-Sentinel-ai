@@ -1,6 +1,7 @@
 import { scanEmail } from "./email-scanner";
 import { toStoredScan, type StoredScan } from "./store";
 import type { GeoInfo } from "./geo";
+import type { DomainIntel, IpInfra } from "./infra";
 
 /**
  * Demo dataset. Every entry is a realistic raw message that is pushed
@@ -69,6 +70,30 @@ Hi team, attaching the draft deck from yesterday's review. Please share feedback
  * (which no lookup can resolve), so the dataset carries realistic city-level
  * coordinates tagged `demo` — consistent with the demo content itself.
  */
+/**
+ * Demo infrastructure intelligence — tagged `demo` like the geolocation it
+ * accompanies, because the demo messages use reserved documentation-range
+ * IPs and .example domains that real lookups cannot resolve.
+ */
+const demoInfra: Record<string, IpInfra> = {
+  // Phishing origin (Old Delhi broadband): on Spamhaus ZEN
+  "203.0.113.44": { blacklists: [{ list: "Spamhaus ZEN", code: "127.0.0.2", meaning: "SBL — known spam source" }], torExit: false, cloudHosting: false, source: "demo" },
+  // Relay (Berlin): live Tor exit relay operator
+  "185.220.101.4": { blacklists: [{ list: "Spamhaus ZEN", code: "127.255.255.254", meaning: "PBL — listed end-user range" }], torExit: true, cloudHosting: false, source: "demo" },
+  // Quota phish (Mumbai data center)
+  "198.51.100.17": { blacklists: [], torExit: false, cloudHosting: true, source: "demo" },
+  // Bank phish (Bengaluru mobile line)
+  "203.0.113.88": { blacklists: [], torExit: false, cloudHosting: false, source: "demo" },
+  // Benign control (Gurugram corporate gateway)
+  "192.0.2.25": { blacklists: [], torExit: false, cloudHosting: false, source: "demo" },
+};
+
+/** Demo MX / WHOIS records for the fictional domains used by the demo messages. */
+const demoDomainIntel: Record<string, DomainIntel> = {
+  "northstar.example": { mx: ["10 mx1.northstar.example", "20 mx2.northstar.example"], whois: { registrar: "Demo Registrar Ltd.", created: "2019-06-01T00:00:00Z" }, source: "demo" },
+  "northstarbank.example": { mx: ["10 mx1.northstarbank.example"], whois: { registrar: "Demo Registrar Ltd.", created: "2024-02-14T00:00:00Z" }, source: "demo" },
+};
+
 const demoGeo: Record<string, GeoInfo> = {
   // Phishing origin: a consumer broadband line in Old Delhi
   "203.0.113.44": { ip: "203.0.113.44", country: "India", countryCode: "IN", region: "Delhi", city: "New Delhi", lat: 28.6139, lon: 77.209, isp: "Residential broadband", org: "Example ISP", asn: "AS132165", source: "demo" },
@@ -92,7 +117,22 @@ export async function buildDemoDataset(): Promise<StoredScan[]> {
       const info = demoGeo[hop.ip];
       if (info) geo[hop.ip] = info;
     }
-    scans.push(toStoredScan(message.raw, result, now - message.minutesAgo * 60_000, true, undefined, geo));
+    const scan = toStoredScan(message.raw, result, now - message.minutesAgo * 60_000, true, undefined, geo);
+    const infra: Record<string, IpInfra> = {};
+    for (const hop of result.hops) {
+      const info = demoInfra[hop.ip];
+      if (info) infra[hop.ip] = info;
+    }
+    if (Object.keys(infra).length > 0) scan.infra = infra;
+    const intel: Record<string, DomainIntel> = {};
+    const senderDomain = result.senderAddress.split("@")[1]?.toLowerCase() ?? "";
+    const replyDomain = result.replyTo.includes("@") ? result.replyTo.split("@")[1]?.toLowerCase() ?? "" : "";
+    for (const domain of [senderDomain, replyDomain]) {
+      const record = demoDomainIntel[domain];
+      if (record) intel[domain] = record;
+    }
+    if (Object.keys(intel).length > 0) scan.domainIntel = intel;
+    scans.push(scan);
   }
   return scans.sort((a, b) => b.scannedAt - a.scannedAt);
 }

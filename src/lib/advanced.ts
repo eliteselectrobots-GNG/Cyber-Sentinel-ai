@@ -1018,3 +1018,81 @@ export function classifyEmail(scan: StoredScan, all: StoredScan[], orgDomain: st
 
   return { className, confidence, verdict, bec, tactics, indicators, evidence };
 }
+
+/* ------------------------------------------------------------------ */
+/* Header & protocol forensics                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Deep header-protocol checks: forged/missing fields, Message-ID and Date
+ * anomalies, envelope-sender consistency, and conflicts between the
+ * authentication claims written INTO the headers and the live DNS results.
+ */
+export function headerForensics(scan: StoredScan): AnalysisFlag[] {
+  const r = scan.result;
+  const flags: AnalysisFlag[] = [];
+  const headerBlock = scan.raw.split(/\r?\n\r?\n/)[0] ?? scan.raw;
+  const headerValue = (name: string) => new RegExp(`^${name}:\\s*(.+)$`, "im").exec(headerBlock)?.[1]?.trim() ?? "";
+  const senderDomain = r.senderAddress.split("@")[1]?.toLowerCase() ?? "";
+
+  const fromHeaders = headerBlock.match(/^from:/gim)?.length ?? 0;
+  if (fromHeaders > 1) {
+    flags.push({ label: "Multiple From headers", detail: `${fromHeaders} From headers found — mailers emit exactly one; duplicates indicate forged or concatenated content.`, severity: "critical" });
+  }
+
+  const messageId = headerValue("message-id");
+  if (!messageId) {
+    flags.push({ label: "Missing Message-ID", detail: "No Message-ID header — most legitimate mailers add one; its absence is common in bulk-send and phishing tooling.", severity: "medium" });
+  } else {
+    const midDomain = (messageId.match(/@([^>\]\s]+)/)?.[1] ?? "").toLowerCase();
+    if (midDomain && senderDomain && !midDomain.endsWith(senderDomain) && !senderDomain.endsWith(midDomain)) {
+      flags.push({ label: "Message-ID host mismatch", detail: `Message-ID belongs to ${midDomain} while the sender claims ${senderDomain}. Forged messages keep the sending system's original ID.`, severity: "high" });
+    }
+  }
+
+  const dateValue = headerValue("date");
+  if (!dateValue) {
+    flags.push({ label: "Missing Date header", detail: "No Date header — RFC 5322 requires one; its absence is unusual in legitimate mail.", severity: "medium" });
+  } else {
+    const parsed = new Date(dateValue);
+    if (Number.isNaN(parsed.getTime())) {
+      flags.push({ label: "Unparseable Date header", detail: `The Date header (“${dateValue.slice(0, 60)}”) cannot be parsed as a real timestamp.`, severity: "medium" });
+    } else {
+      const diffMs = Date.now() - parsed.getTime();
+      if (diffMs < -24 * 3600e3) flags.push({ label: "Date header in the future", detail: "The message is dated more than a day ahead of analysis time — clock skew or header manipulation.", severity: "high" });
+      else if (diffMs > 90 * 86400e3) flags.push({ label: "Date header unusually old", detail: "The message is dated more than 90 days before analysis — unusual for a fresh delivery.", severity: "info" });
+    }
+  }
+
+  if (!headerValue("return-path") && r.returnPath === "Not present") {
+    flags.push({ label: "Missing Return-Path", detail: "No envelope sender (Return-Path) — bounce handling and some SPF checks cannot be anchored.", severity: "medium" });
+  }
+
+  const xOriginating = headerValue("x-originating-ip");
+  if (xOriginating) {
+    flags.push({ label: "Client IP disclosed (X-Originating-IP)", detail: `The header exposes the originating client IP (${xOriginating.trim()}) — a disclosure most providers strip; useful when present.`, severity: "info" });
+  }
+
+  // Conflicts between the authentication claims written into the headers and
+  // the live DNS verification captured at scan time.
+  const claimsText = (headerBlock.match(/^authentication-results:.*$/gim) ?? []).join(" ").toLowerCase();
+  if (claimsText) {
+    for (const check of scan.auth?.checks ?? []) {
+      if (check.outcome !== "fail") continue;
+      const kind = check.kind.toLowerCase();
+      if (new RegExp(`${kind}=pass`).test(claimsText)) {
+        flags.push({
+          label: "Header overstates authentication vs live DNS",
+          detail: `The headers claim ${check.kind} pass for ${check.domain}, but the live DNS check failed: ${check.detail}`,
+          severity: "critical",
+        });
+      }
+    }
+  }
+
+  if (r.hops.length === 1 && r.hops[0]?.status === "origin" && r.hops[0]?.ip === "Not disclosed") {
+    flags.push({ label: "No disclosed relay path", detail: "No Received hop discloses an IP — the sender's infrastructure is fully hidden, normal for Google-hosted mail and a red flag for others.", severity: "info" });
+  }
+
+  return flags;
+}

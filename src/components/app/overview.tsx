@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { timeAgo, Bar, Card, CardHeader, ClassTag, DemoTag, DotLegend, EmptyState, GeoLine, PageHeader, SeverityBadge, Stat, type PageKey } from "./ui";
+import { timeAgo, Bar, Card, CardHeader, ClassTag, DemoTag, DotLegend, EmptyState, GeoLine, InfraChips, PageHeader, SeverityBadge, Stat, type PageKey } from "./ui";
 
 const severityColors: Record<string, string> = { Critical: "#e5484d", High: "#e2c04c", Medium: "#35c7c0", Low: "#53d88a" };
 const signalTone: Record<string, string> = { critical: "bg-status-critical", high: "bg-status-warning", medium: "bg-brand", info: "bg-brand" };
@@ -303,13 +303,14 @@ function RelayTraceCard({ scans, navigate }: { scans: StoredScan[]; navigate: (p
                   </div>
                   <p className={`mt-1 font-mono text-xs ${disclosed ? "text-foreground" : "text-muted-foreground"}`}>{hop.ip}</p>
                   {hopGeo && <div className="mt-1"><GeoLine geo={hopGeo} compact /></div>}
+                  {latest && <InfraChips scan={latest} ip={hop.ip} />}
                 </div>
               </div>
             );
           })}
           <div className="mt-5 flex items-center gap-2 border border-status-warning/20 bg-status-warning/5 px-3 py-2 font-mono text-[10px] text-status-warning">
             <AlertTriangle className="size-3" />
-            Hop IPs are geolocated to city level at scan time; IP reputation / threat-feed lookups arrive with the server build.
+            Hop IPs are geolocated to city level at scan time; blacklists (Spamhaus ZEN / SpamCop), Tor exit checks, and hosting fingerprints are resolved live per hop.
           </div>
         </div>
       )}

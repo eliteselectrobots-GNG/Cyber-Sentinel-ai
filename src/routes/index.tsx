@@ -7,6 +7,7 @@ import { addScan, clearScans, deleteScan, listScans, toStoredScan, type StoredSc
 import { buildDemoDataset } from "@/lib/demo-data";
 import { enrichWithDns } from "@/lib/dns";
 import { enrichIps, flagEmoji, locationLabel } from "@/lib/geo";
+import { enrichIpInfra, lookupDomainIntel } from "@/lib/infra";
 import type { EmailScanResult } from "@/lib/email-scanner";
 import { ScannerDialog } from "@/components/app/scanner-dialog";
 import { OverviewPage } from "@/components/app/overview";
@@ -127,13 +128,46 @@ function AegisTraceShell() {
     } catch {
       // geolocation is best-effort; the scan itself always succeeds
     }
+    try {
+      // Infrastructure pass: blacklists (Spamhaus ZEN/SpamCop), Tor exit check,
+      // and cloud-hosting fingerprints — capped to keep the scan snappy.
+      const infra: NonNullable<StoredScan["infra"]> = {};
+      for (const [ip, info] of Object.entries(stored.geo ?? {})) {
+        const result = await enrichIpInfra(ip, info);
+        if (result) infra[ip] = result;
+        if (Object.keys(infra).length >= 5) break;
+      }
+      if (Object.keys(infra).length > 0) stored.infra = infra;
+    } catch {
+      // infrastructure checks are best-effort; the scan itself always succeeds
+    }
+    try {
+      // Domain intelligence: MX records + WHOIS/registrar for the sender + reply domains.
+      const domains = [...new Set([result.senderAddress.split("@")[1]?.toLowerCase() ?? "", result.replyTo.includes("@") ? result.replyTo.split("@")[1]?.toLowerCase() ?? "" : ""].filter(Boolean))].slice(0, 3);
+      const intel: NonNullable<StoredScan["domainIntel"]> = {};
+      for (const domain of domains) {
+        const lookup = await lookupDomainIntel(domain);
+        if (lookup) intel[domain] = lookup;
+      }
+      if (Object.keys(intel).length > 0) stored.domainIntel = intel;
+    } catch {
+      // domain intelligence is best-effort; the scan itself always succeeds
+    }
     await addScan(stored);
     await reload();
     navigate("overview");
     const failures = (stored.auth?.checks ?? []).filter((check) => check.outcome === "fail").length;
     const originGeo = originIp ? stored.geo?.[originIp] : undefined;
     const originNote = originGeo ? ` Origin located: ${locationLabel(originGeo)} ${flagEmoji(originGeo.countryCode)}.` : "";
-    notify(failures > 0 ? `${result.riskLabel} risk · ${stored.caseId} — ${failures} live DNS check${failures === 1 ? "" : "s"} failed.${originNote}` : `${result.riskLabel} risk · case ${stored.caseId} stored in the evidence vault.${originNote}`);
+    const blacklistHits = Object.values(stored.infra ?? {}).flatMap((entry) => entry.blacklists);
+    const torHops = Object.values(stored.infra ?? {}).filter((entry) => entry.torExit).length;
+    const infraNote =
+      blacklistHits.length > 0
+        ? ` ${blacklistHits.length} blacklist hit${blacklistHits.length === 1 ? "" : "s"}${torHops > 0 ? ", relay uses Tor" : ""}.`
+        : torHops > 0
+          ? ` Relay path traverses a Tor exit node.`
+          : "";
+    notify(failures > 0 ? `${result.riskLabel} risk · ${stored.caseId} — ${failures} live DNS check${failures === 1 ? "" : "s"} failed.${originNote}${infraNote}` : `${result.riskLabel} risk · case ${stored.caseId} stored in the evidence vault.${originNote}${infraNote}`);
   };
 
   const handleDelete = async (id: string) => {

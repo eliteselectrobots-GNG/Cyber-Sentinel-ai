@@ -1,6 +1,7 @@
 import { scanEmail, type EmailScanResult } from "./email-scanner";
 import type { DnsEnrichment } from "./dns";
 import type { GeoInfo } from "./geo";
+import type { DomainIntel, IpInfra } from "./infra";
 
 export type StoredScan = {
   /** Stable unique id (uuid). */
@@ -17,6 +18,10 @@ export type StoredScan = {
   auth?: DnsEnrichment;
   /** Geolocation enrichment per IP, captured at scan time. */
   geo?: Record<string, GeoInfo>;
+  /** Infrastructure intelligence per IP (blacklists, Tor exit, hosting), captured at scan time. */
+  infra?: Record<string, IpInfra>;
+  /** Domain intelligence (MX, WHOIS/registrar) for the sender + reply domains, captured at scan time. */
+  domainIntel?: Record<string, DomainIntel>;
 };
 
 const DB_NAME = "aegistrace-db";
