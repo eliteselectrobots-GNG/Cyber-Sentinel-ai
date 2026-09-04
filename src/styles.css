@@ -37,11 +37,12 @@
   --color-map: var(--map);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  --color-accent2: var(--accent2);
   --color-status-safe: var(--status-safe);
   --color-status-warning: var(--status-warning);
   --color-status-critical: var(--status-critical);
   --font-sans: "Work Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Chakra Petch", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
@@ -53,8 +54,8 @@
   --card-foreground: oklch(0.94 0.018 220);
   --popover: oklch(0.18 0.025 250);
   --popover-foreground: oklch(0.94 0.018 220);
-  --primary: oklch(0.76 0.15 190);
-  --primary-foreground: oklch(0.13 0.025 250);
+  --primary: oklch(0.64 0.17 285);
+  --primary-foreground: oklch(0.98 0.005 290);
   --secondary: oklch(0.22 0.03 250);
   --secondary-foreground: oklch(0.9 0.02 220);
   --muted: oklch(0.21 0.025 250);
@@ -65,7 +66,7 @@
   --destructive-foreground: oklch(0.98 0.01 220);
   --border: oklch(0.28 0.035 245);
   --input: oklch(0.3 0.04 245);
-  --ring: oklch(0.76 0.15 190);
+  --ring: oklch(0.64 0.17 285);
   --shell: oklch(0.13 0.025 250);
   --sidebar: oklch(0.105 0.023 250);
   --sidebar-foreground: oklch(0.91 0.02 220);
@@ -74,8 +75,9 @@
   --surface: oklch(0.165 0.028 248);
   --surface-elevated: oklch(0.2 0.032 247);
   --map: oklch(0.145 0.035 230);
-  --brand: oklch(0.76 0.15 190);
-  --brand-foreground: oklch(0.12 0.025 250);
+  --brand: oklch(0.64 0.17 285);
+  --brand-foreground: oklch(0.98 0.005 290);
+  --accent2: oklch(0.7 0.14 55);
   --status-safe: oklch(0.74 0.16 155);
   --status-warning: oklch(0.8 0.16 85);
   --status-critical: oklch(0.7 0.19 25);

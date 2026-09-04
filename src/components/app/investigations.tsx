@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ChevronRight, Download, Fingerprint, Globe2, Link2, Mail, Network, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Download, Fingerprint, Globe2, Link2, Mail, Network, RefreshCw, Trash2, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -234,21 +234,66 @@ function HeaderAnalysis({ scan }: { scan: StoredScan }) {
     { label: "Relay hops", value: `${scan.result.hops.length} (${scan.result.hops.map((hop) => hop.ip).join(" → ")})` },
   ];
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div>
-        <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Key routing fields</p>
-        <dl className="space-y-3 text-xs">
-          {rows.map((row) => (
-            <div key={row.label} className="flex justify-between gap-4 border-b border-border pb-2">
-              <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
-              <dd className="break-all text-right font-mono text-foreground">{row.value}</dd>
-            </div>
-          ))}
-        </dl>
+    <>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Key routing fields</p>
+          <dl className="space-y-3 text-xs">
+            {rows.map((row) => (
+              <div key={row.label} className="flex justify-between gap-4 border-b border-border pb-2">
+                <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+                <dd className="break-all text-right font-mono text-foreground">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+        <div>
+          <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Raw header block</p>
+          <pre className="max-h-[420px] overflow-auto border border-border bg-shell p-3 font-mono text-[10px] leading-5 text-foreground">{rawHeaderBlock}</pre>
+        </div>
       </div>
-      <div>
-        <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Raw header block</p>
-        <pre className="max-h-[420px] overflow-auto border border-border bg-shell p-3 font-mono text-[10px] leading-5 text-foreground">{rawHeaderBlock}</pre>
+      <AuthChecks scan={scan} />
+    </>
+  );
+}
+
+function AuthChecks({ scan }: { scan: StoredScan }) {
+  const checks = scan.auth?.checks ?? [];
+  if (checks.length === 0) {
+    return (
+      <div className="mt-6 border border-border bg-shell/60 p-4 text-[11px] leading-5 text-muted-foreground">
+        No live DNS authentication checks were captured with this case{scan.demo ? " — demo records skip network lookups." : ". Re-run the scan while online to verify SPF, DMARC, and DKIM against live DNS."}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-6">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Live authentication · DNS-over-HTTPS</p>
+        {scan.auth?.offline ? (
+          <span className="font-mono text-[9px] uppercase tracking-wider text-status-warning">DNS unreachable at scan time</span>
+        ) : (
+          <span className="font-mono text-[9px] uppercase tracking-wider text-status-safe">Resolved live · {new Date(scan.auth?.checkedAt ?? scan.scannedAt).toLocaleTimeString()}</span>
+        )}
+      </div>
+      <div className="divide-y divide-border border border-border">
+        {checks.map((check) => {
+          const failed = check.outcome === "fail";
+          const soft = check.outcome === "softfail";
+          const passed = check.outcome === "pass";
+          return (
+            <div key={`${check.kind}-${check.domain}`} className="flex items-start gap-3 p-3">
+              {failed ? <XCircle className="mt-0.5 size-4 shrink-0 text-status-critical" /> : soft ? <AlertTriangle className="mt-0.5 size-4 shrink-0 text-status-warning" /> : passed ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-status-safe" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground/60" />}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{check.kind} · {check.domain}</span>
+                  <span className={`font-mono text-[9px] font-semibold uppercase tracking-wider ${failed ? "text-status-critical" : soft ? "text-status-warning" : passed ? "text-status-safe" : "text-muted-foreground"}`}>{check.outcome}</span>
+                </div>
+                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{check.detail}</p>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

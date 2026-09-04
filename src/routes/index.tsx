@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Activity, CheckCircle2, ChevronRight, Fingerprint, LayoutDashboard, MailWarning, Menu, Network, Settings2, ShieldCheck, UserRound, X, type LucideIcon } from "lucide-react";
+import { Activity, CheckCircle2, Fingerprint, LayoutDashboard, MailWarning, Menu, Network, Settings2, ShieldCheck, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { addScan, clearScans, deleteScan, listScans, toStoredScan, type StoredScan } from "@/lib/store";
 import { buildDemoDataset } from "@/lib/demo-data";
+import { enrichWithDns } from "@/lib/dns";
 import type { EmailScanResult } from "@/lib/email-scanner";
 import { ScannerDialog } from "@/components/app/scanner-dialog";
 import { OverviewPage } from "@/components/app/overview";
@@ -111,10 +112,19 @@ function AegisTraceShell() {
 
   const handleScanResult = async (raw: string, result: EmailScanResult) => {
     const stored = toStoredScan(raw, result);
+    const originHop = result.hops.find((hop) => hop.status === "origin") ?? result.hops[0];
+    const originIp = originHop && originHop.ip !== "Not disclosed" ? originHop.ip : null;
+    try {
+      const auth = await enrichWithDns(result.senderAddress, result.replyTo, result.returnPath, originIp);
+      if (auth.checks.length > 0) stored.auth = auth;
+    } catch {
+      // live DNS is best-effort; the scan itself always succeeds
+    }
     await addScan(stored);
     await reload();
     navigate("overview");
-    notify(`${result.riskLabel} risk · case ${stored.caseId} stored in the evidence vault.`);
+    const failures = (stored.auth?.checks ?? []).filter((check) => check.outcome === "fail").length;
+    notify(failures > 0 ? `${result.riskLabel} risk · ${stored.caseId} — ${failures} live DNS check${failures === 1 ? "" : "s"} failed.` : `${result.riskLabel} risk · case ${stored.caseId} stored in the evidence vault.`);
   };
 
   const handleDelete = async (id: string) => {
@@ -156,7 +166,7 @@ function AegisTraceShell() {
   const renderPage = () => {
     switch (page) {
       case "overview":
-        return <OverviewPage scans={scans} openScanner={() => setScanOpen(true)} openCase={openCase} navigate={navigate} notify={notify} />;
+        return <OverviewPage scans={scans} openScanner={() => setScanOpen(true)} openCase={openCase} navigate={navigate} notify={notify} loadDemo={() => void handleLoadDemo()} />;
       case "investigations":
         return <InvestigationsPage scans={scans} selectedId={selectedCase} onSelect={setSelectedCase} onDelete={(id) => void handleDelete(id)} navigate={navigate} notify={notify} />;
       case "relay":
@@ -251,11 +261,11 @@ function AegisTraceShell() {
         <header className="sticky top-0 z-30 flex h-20 items-center justify-between border-b border-border bg-shell/95 px-5 backdrop-blur lg:px-8">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Menu className="size-5" /></Button>
-            <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><span>Workspace</span><ChevronRight className="size-3" /><span className="text-foreground">{pageTitles[page]}</span></div>
-            <p className="font-display text-sm font-semibold sm:hidden">{pageTitles[page]}</p>
+            <span className="size-1.5 rounded-full bg-brand" aria-hidden="true" />
+            <p className="font-display text-sm font-semibold tracking-wide text-foreground">{pageTitles[page]}</p>
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
-            <Button variant="outline" size="sm" onClick={() => setScanOpen(true)}><ShieldCheck className="size-3.5" />Analyze email</Button>
+            <Button size="sm" onClick={() => setScanOpen(true)}><ShieldCheck className="size-3.5" />Analyze email</Button>
             <div className="hidden h-5 w-px bg-border sm:block" />
             <button className="flex items-center gap-2 text-left" aria-label="Open settings" onClick={() => navigate("settings")}>
               <div className="flex size-8 items-center justify-center bg-brand text-xs font-bold text-brand-foreground">{initials}</div>

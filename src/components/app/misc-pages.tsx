@@ -123,8 +123,8 @@ const engineSignals = [
   { name: "Relay path reconstruction", status: true, note: "Received header parsing" },
   { name: "Evidence fingerprinting", status: true, note: "SHA-256 via WebCrypto" },
   { name: ".eml intake (≤1 MB)", status: true, note: "Local file ingestion" },
-  { name: "DNS-level SPF/DKIM/DMARC verification", status: false, note: "Phase 2 · server" },
-  { name: "IP reputation, ASN & geolocation", status: false, note: "Phase 2 · server" },
+  { name: "DNS-level SPF/DKIM/DMARC verification", status: true, note: "Live · DNS-over-HTTPS" },
+  { name: "IP reputation, ASN & geolocation", status: false, note: "Phase 2 · origin map" },
   { name: "Lookalike-domain detection", status: false, note: "Phase 2 · server" },
   { name: "URL extraction & reputation", status: false, note: "Phase 2 · server" },
 ];

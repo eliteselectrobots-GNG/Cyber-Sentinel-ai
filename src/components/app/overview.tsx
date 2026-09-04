@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUpRight, CheckCircle2, ChevronRight, Database, Fingerprint, Globe2, MailWarning, Network, RefreshCw, Server, Zap } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CheckCircle2, ChevronRight, Database, Fingerprint, FlaskConical, Globe2, MailWarning, Network, RefreshCw, Server, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +35,7 @@ function TopSignals({ scans }: { scans: StoredScan[] }) {
 import { severityCount, severityDistribution, campaignClusters } from "@/lib/stats";
 import { verifyEvidence, type StoredScan } from "@/lib/store";
 
-export function OverviewPage({ scans, openScanner, openCase, navigate, notify }: { scans: StoredScan[]; openScanner: () => void; openCase: (id: string) => void; navigate: (page: PageKey) => void; notify: (msg: string) => void }) {
+export function OverviewPage({ scans, openScanner, openCase, navigate, notify, loadDemo }: { scans: StoredScan[]; openScanner: () => void; openCase: (id: string) => void; navigate: (page: PageKey) => void; notify: (msg: string) => void; loadDemo: () => void }) {
   const distribution = severityDistribution(scans);
   const latest = scans[0];
   const clusters = campaignClusters(scans).filter((c) => c.count >= 2);
@@ -52,6 +52,27 @@ export function OverviewPage({ scans, openScanner, openCase, navigate, notify }:
           </>
         }
       />
+
+      {scans.length === 0 && (
+        <section className="mb-6 overflow-hidden border border-brand/30 bg-gradient-to-br from-brand/10 via-surface to-surface">
+          <div className="flex flex-col gap-6 p-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-xl">
+              <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand">Welcome to AegisTrace</p>
+              <h2 className="font-display text-2xl font-semibold tracking-tight text-foreground">First scan takes under 30 seconds</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">Paste a suspicious email or upload a .eml file. You get an explainable verdict, the relay path, and a verifiable evidence fingerprint — all processed in your browser.</p>
+              <ol className="mt-4 space-y-1.5 text-xs text-muted-foreground">
+                <li className="flex items-center gap-2"><span className="flex size-4 items-center justify-center rounded-full bg-brand/15 font-mono text-[9px] font-semibold text-brand">1</span>Add the raw email or .eml evidence</li>
+                <li className="flex items-center gap-2"><span className="flex size-4 items-center justify-center rounded-full bg-brand/15 font-mono text-[9px] font-semibold text-brand">2</span>Get an explainable risk verdict with findings</li>
+                <li className="flex items-center gap-2"><span className="flex size-4 items-center justify-center rounded-full bg-brand/15 font-mono text-[9px] font-semibold text-brand">3</span>Evidence is stored with a re-verifiable SHA-256 fingerprint</li>
+              </ol>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col">
+              <Button onClick={openScanner}><Zap className="size-4" />Analyze an email</Button>
+              <Button variant="outline" onClick={loadDemo}><FlaskConical className="size-4" />Or explore with demo data</Button>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="mb-6 grid gap-px border border-border bg-border sm:grid-cols-2 xl:grid-cols-4" aria-label="Live summary">
         <Stat label="Emails analyzed" value={String(scans.length)} sub={`${scans.length === 1 ? "evidence record" : "evidence records"} stored locally`} icon={MailWarning} tone="brand" />

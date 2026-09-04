@@ -79,7 +79,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "AegisTrace | Email Threat Intelligence" },
       { name: "description", content: "AI-powered email threat detection, relay tracing, and forensic intelligence for security teams." },
-      { name: "author", content: "Lovable" },
+      { name: "author", content: "Cyber Sentinel Team" },
       { property: "og:title", content: "AegisTrace | Email Threat Intelligence" },
       { property: "og:description", content: "Investigate suspicious email with explainable risk scoring, relay reconstruction, and campaign intelligence." },
       { property: "og:type", content: "website" },
@@ -89,7 +89,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     links: [
        { rel: "preconnect", href: "https://fonts.googleapis.com" },
        { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" },
+       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Work+Sans:wght@400;500;600;700&display=swap" },
       {
         rel: "stylesheet",
         href: appCss,
