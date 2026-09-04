@@ -1,10 +1,11 @@
-import { AlertTriangle, CheckCircle2, ChevronRight, Download, Fingerprint, Globe2, Link2, Mail, Network, RefreshCw, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Download, Fingerprint, Globe2, Link2, Mail, MapPin, Network, RefreshCw, Server, Trash2, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { verifyEvidence, type StoredScan } from "@/lib/store";
 import { extractIocs, iocTotals, relatedCases, type IoC } from "@/lib/iocs";
-import { DemoTag, EmptyState, IntegrityBadge, PageHeader, SeverityBadge, timeAgo, type PageKey } from "./ui";
+import { distanceKm, flagEmoji, locationLabel, type GeoInfo } from "@/lib/geo";
+import { DemoTag, EmptyState, GeoLine, IntegrityBadge, PageHeader, SeverityBadge, timeAgo, type PageKey } from "./ui";
 
 function downloadReport(scan: StoredScan) {
   const iocs = extractIocs(scan.raw, scan.result);
@@ -26,7 +27,10 @@ function downloadReport(scan: StoredScan) {
     ``,
     `RELAY PATH`,
     `----------`,
-    ...scan.result.hops.map((h, i) => `${i + 1}. ${h.label}: ${h.ip} (${h.status}) — ${h.detail}`),
+    ...scan.result.hops.map((h, i) => {
+      const g = scan.geo?.[h.ip];
+      return `${i + 1}. ${h.label}: ${h.ip} (${h.status})${g ? ` — ${locationLabel(g)} ${flagEmoji(g.countryCode)}` : ""} — ${h.detail}`;
+    }),
     ``,
     `INDICATORS OF COMPROMISE`,
     `------------------------`,
@@ -50,9 +54,9 @@ function downloadReport(scan: StoredScan) {
   URL.revokeObjectURL(url);
 }
 
-type DetailTab = "Overview" | "Header analysis" | "IoCs" | "Timeline" | "Body";
+type DetailTab = "Overview" | "Header analysis" | "Origin map" | "IoCs" | "Timeline" | "Body";
 
-const tabs: DetailTab[] = ["Overview", "Header analysis", "IoCs", "Timeline", "Body"];
+const tabs: DetailTab[] = ["Overview", "Header analysis", "Origin map", "IoCs", "Timeline", "Body"];
 
 export function InvestigationsPage({
   scans,
@@ -195,7 +199,8 @@ function CaseDetail({ scan, scans, onSelect, onDelete, notify }: { scan: StoredS
         )}
 
         {tab === "Header analysis" && <HeaderAnalysis scan={scan} />}
-        {tab === "IoCs" && <IocTab iocs={iocs} />}
+        {tab === "Origin map" && <OriginMapTab scan={scan} />}
+        {tab === "IoCs" && <IocTab iocs={iocs} scan={scan} />}
         {tab === "Timeline" && <TimelineTab scan={scan} />}
         {tab === "Body" && <BodyTab scan={scan} />}
       </div>
@@ -299,6 +304,130 @@ function AuthChecks({ scan }: { scan: StoredScan }) {
   );
 }
 
+function OriginMapTab({ scan }: { scan: StoredScan }) {
+  const path = useMemo(() => {
+    const reversed = [...scan.result.hops];
+    if (reversed[0]?.status === "relay" && reversed.at(-1)?.status === "origin") reversed.reverse();
+    return reversed;
+  }, [scan]);
+
+  const geoHops = useMemo(() => {
+    return path
+      .map((hop, index) => ({
+        geo: scan.geo?.[hop.ip] ?? null,
+        role: index === 0 ? ("origin" as const) : index === path.length - 1 ? ("destination" as const) : ("relay" as const),
+      }))
+      .filter((entry): entry is { geo: GeoInfo; role: "origin" | "relay" | "destination" } => !!entry.geo && (entry.geo.lat !== 0 || entry.geo.lon !== 0));
+  }, [path, scan]);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start gap-2.5 border border-border bg-map/60 p-3 text-[11px] leading-5 text-muted-foreground">
+        <MapPin className="mt-0.5 size-3.5 shrink-0 text-brand" />
+        <span>
+          City-level attribution from <b className="font-medium text-foreground">IP geolocation</b> — each address was resolved when this case was scanned{scan.demo ? " (demo coordinates)" : ""}. Geolocation is approximate to city level and never a street address.
+        </span>
+      </div>
+      {geoHops.length >= 2 && <OriginMapSvg points={geoHops} />}
+      <div className="space-y-0">
+        {path.map((hop, index) => {
+          const geo = scan.geo?.[hop.ip] ?? null;
+          const isOrigin = index === 0;
+          const isLast = index === path.length - 1;
+          const prevHop = path[index - 1];
+          const prevGeo = prevHop ? (scan.geo?.[prevHop.ip] ?? null) : null;
+          let km: number | null = null;
+          if (geo && prevGeo && (geo.lat !== 0 || geo.lon !== 0) && (prevGeo.lat !== 0 || prevGeo.lon !== 0)) {
+            km = distanceKm(prevGeo, geo);
+          }
+          return (
+            <div key={`${hop.ip}-${index}`} className="relative flex gap-4 pb-6 last:pb-0">
+              {!isLast && <span className="absolute left-[13px] top-7 h-full w-px bg-border" />}
+              <div className={`relative z-10 flex size-7 shrink-0 items-center justify-center border ${isOrigin ? "border-status-critical text-status-critical" : "border-brand text-brand"} bg-surface`}>
+                {isOrigin ? <AlertTriangle className="size-3.5" /> : isLast ? <Server className="size-3.5" /> : <Network className="size-3.5" />}
+              </div>
+              <div className="min-w-0 flex-1 pt-0.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold text-foreground">{isOrigin ? "Earliest reliable origin" : isLast ? "Destination MX" : `Relay ${index}`}</p>
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{hop.status}</span>
+                </div>
+                <p className="mt-1 break-all font-mono text-xs text-foreground">{hop.ip}</p>
+                {geo ? (
+                  <div className="mt-1.5 space-y-1">
+                    <GeoLine geo={geo} />
+                    <p className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                      {geo.lat !== 0 && <span>{geo.lat.toFixed(4)}, {geo.lon.toFixed(4)}</span>}
+                      {geo.isp && <span>{geo.isp}</span>}
+                      {geo.org && geo.org !== geo.isp && <span>{geo.org}</span>}
+                    </p>
+                    {km !== null && <p className="font-mono text-[10px] text-brand">≈ {km.toLocaleString()} km from previous hop</p>}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">Location lookup unavailable — {hop.ip === "Not disclosed" ? "no IP disclosed in this header" : "reserved address or the lookup was unreachable"}.</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function smoothPath(points: { x: number; y: number }[]): string {
+  const first = points[0];
+  if (!first || points.length < 2) return "";
+  const d = [`M ${first.x.toFixed(1)} ${first.y.toFixed(1)}`];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    if (!p1 || !p2) break;
+    const p0 = points[i - 1] ?? p1;
+    const p3 = points[i + 2] ?? p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d.push(`C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`);
+  }
+  return d.join(" ");
+}
+
+function OriginMapSvg({ points }: { points: { geo: GeoInfo; role: "origin" | "relay" | "destination" }[] }) {
+  const W = 640;
+  const H = 300;
+  const PAD = 48;
+  const project = (geo: GeoInfo) => ({
+    x: PAD + ((geo.lon + 180) / 360) * (W - PAD * 2),
+    y: PAD + ((90 - geo.lat) / 180) * (H - PAD * 2),
+  });
+  const projected = points.map((point) => ({ ...point, ...project(point.geo) }));
+  const route = smoothPath(projected);
+  const color = (role: "origin" | "relay" | "destination") => (role === "origin" ? "#f05252" : role === "destination" ? "#4ecf8f" : "#7c69ef");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Geographic path between the message origin and destination" style={{ aspectRatio: `${W} / ${H}` }}>
+      <defs>
+        <pattern id="geo-grid" width="22" height="22" patternUnits="userSpaceOnUse">
+          <circle cx="1.5" cy="1.5" r="1.2" fill="rgba(124,105,239,0.22)" />
+        </pattern>
+      </defs>
+      <rect width={W} height={H} fill="#15152a" />
+      <rect width={W} height={H} fill="url(#geo-grid)" />
+      <path d={route} fill="none" stroke="#7c69ef" strokeWidth="1.6" strokeLinecap="round" opacity="0.85" />
+      {projected.map((point, index) => (
+        <g key={`${point.geo.ip}-${index}`}>
+          <circle cx={point.x} cy={point.y} r="5.5" fill="#15152a" stroke={color(point.role)} strokeWidth="2" />
+          <circle cx={point.x} cy={point.y} r="2" fill={color(point.role)} />
+          <text x={point.x} y={point.y - 12} textAnchor={point.x < W / 2 ? "start" : "end"} fontSize="10" fill="#8b93a7" fontFamily="IBM Plex Mono, monospace">
+            {`${flagEmoji(point.geo.countryCode)} ${point.geo.city}`}
+          </text>
+        </g>
+      ))}
+      <text x={W - PAD} y={H - 14} textAnchor="end" fontSize="9" fill="#5b6478" fontFamily="IBM Plex Mono, monospace">Equirectangular projection · city-level IP geolocation</text>
+    </svg>
+  );
+}
+
 const iocTypeMeta: Record<IoC["type"], { icon: typeof Globe2; color: string }> = {
   IP: { icon: Globe2, color: "bg-status-critical/10 text-status-critical border-status-critical/30" },
   Domain: { icon: Network, color: "bg-status-warning/10 text-status-warning border-status-warning/30" },
@@ -306,7 +435,7 @@ const iocTypeMeta: Record<IoC["type"], { icon: typeof Globe2; color: string }> =
   Email: { icon: Mail, color: "bg-status-safe/10 text-status-safe border-status-safe/30" },
 };
 
-function IocTab({ iocs }: { iocs: IoC[] }) {
+function IocTab({ iocs, scan }: { iocs: IoC[]; scan: StoredScan }) {
   if (iocs.length === 0) {
     return <EmptyState title="No indicators extracted" detail="No IPs, domains, URLs, or addresses could be extracted from this evidence." />;
   }
@@ -322,11 +451,13 @@ function IocTab({ iocs }: { iocs: IoC[] }) {
         {iocs.map((ioc) => {
           const meta = iocTypeMeta[ioc.type];
           const Icon = meta.icon;
+          const iocGeo = ioc.type === "IP" ? (scan.geo?.[ioc.value] ?? null) : null;
           return (
             <div key={`${ioc.type}:${ioc.value}`} className={`flex items-start gap-3 border p-3 ${meta.color}`}>
               <Icon className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0">
                 <p className="break-all font-mono text-xs text-foreground">{ioc.value}</p>
+                {iocGeo && <p className="mt-1.5"><GeoLine geo={iocGeo} compact /></p>}
                 <p className="mt-1 font-mono text-[9px] uppercase tracking-wider opacity-70">{ioc.type} · {ioc.source}</p>
               </div>
             </div>

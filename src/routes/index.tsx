@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { addScan, clearScans, deleteScan, listScans, toStoredScan, type StoredScan } from "@/lib/store";
 import { buildDemoDataset } from "@/lib/demo-data";
 import { enrichWithDns } from "@/lib/dns";
+import { enrichIps, flagEmoji, locationLabel } from "@/lib/geo";
 import type { EmailScanResult } from "@/lib/email-scanner";
 import { ScannerDialog } from "@/components/app/scanner-dialog";
 import { OverviewPage } from "@/components/app/overview";
@@ -120,11 +121,19 @@ function AegisTraceShell() {
     } catch {
       // live DNS is best-effort; the scan itself always succeeds
     }
+    try {
+      const geo = await enrichIps(result.hops.map((hop) => hop.ip));
+      if (Object.keys(geo).length > 0) stored.geo = geo;
+    } catch {
+      // geolocation is best-effort; the scan itself always succeeds
+    }
     await addScan(stored);
     await reload();
     navigate("overview");
     const failures = (stored.auth?.checks ?? []).filter((check) => check.outcome === "fail").length;
-    notify(failures > 0 ? `${result.riskLabel} risk · ${stored.caseId} — ${failures} live DNS check${failures === 1 ? "" : "s"} failed.` : `${result.riskLabel} risk · case ${stored.caseId} stored in the evidence vault.`);
+    const originGeo = originIp ? stored.geo?.[originIp] : undefined;
+    const originNote = originGeo ? ` Origin located: ${locationLabel(originGeo)} ${flagEmoji(originGeo.countryCode)}.` : "";
+    notify(failures > 0 ? `${result.riskLabel} risk · ${stored.caseId} — ${failures} live DNS check${failures === 1 ? "" : "s"} failed.${originNote}` : `${result.riskLabel} risk · case ${stored.caseId} stored in the evidence vault.${originNote}`);
   };
 
   const handleDelete = async (id: string) => {

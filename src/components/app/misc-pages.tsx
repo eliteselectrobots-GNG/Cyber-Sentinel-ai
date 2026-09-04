@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { campaignClusters, originIpOf } from "@/lib/stats";
 import type { StoredScan } from "@/lib/store";
-import { Card, CardHeader, EmptyState, PageHeader, timeAgo, type PageKey } from "./ui";
+import { Card, CardHeader, EmptyState, GeoLine, PageHeader, timeAgo, type PageKey } from "./ui";
 
 export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navigate: (page: PageKey) => void }) {
   const latest = scans[0];
@@ -16,7 +16,7 @@ export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navig
 
   return (
     <>
-      <PageHeader title="Relay trace reconstruction" description="The forwarding path of each message, rebuilt from its Received headers. Enrichment such as ASN, geolocation, and reputation lands with the server integration." actions={<Button variant="outline" onClick={() => navigate("overview")}><Network className="size-4" />Overview</Button>} />
+      <PageHeader title="Relay trace reconstruction" description="The forwarding path of each message, rebuilt from its Received headers, with city-level geolocation and ASN attribution resolved live at scan time." actions={<Button variant="outline" onClick={() => navigate("overview")}><Network className="size-4" />Overview</Button>} />
       {scans.length === 0 ? (
         <div className="border border-border bg-surface"><EmptyState title="No traces yet" detail="Analyze an email that includes Received headers to reconstruct its path." /></div>
       ) : (
@@ -30,6 +30,7 @@ export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navig
                 {hops.map((hop, index) => {
                   const isOrigin = index === 0;
                   const isLast = index === hops.length - 1;
+                  const hopGeo = latest?.geo?.[hop.ip] ?? null;
                   return (
                     <div key={`${hop.ip}-${index}`} className="relative flex gap-4 pb-6 last:pb-0">
                       {!isLast && <span className="absolute left-[13px] top-7 h-full w-px bg-border" />}
@@ -42,7 +43,7 @@ export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navig
                           <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{hop.status}</span>
                         </div>
                         <p className={`mt-1 font-mono text-xs ${hop.ip === "Not disclosed" ? "text-muted-foreground" : "text-foreground"}`}>{hop.ip}</p>
-                        <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{hop.detail}</p>
+                        {hopGeo ? <div className="mt-1"><GeoLine geo={hopGeo} /></div> : <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{hop.detail}</p>}
                       </div>
                     </div>
                   );
@@ -55,11 +56,13 @@ export function RelayTracePage({ scans, navigate }: { scans: StoredScan[]; navig
             <div className="divide-y divide-border">
               {scans.map((scan) => {
                 const originIp = originIpOf(scan);
+                const originGeo = originIp ? (scan.geo?.[originIp] ?? null) : null;
                 return (
                   <div key={scan.id} className="flex items-center gap-3 p-4">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium text-foreground">{scan.result.subject}</p>
                       <p className="mt-1 font-mono text-[9px] text-muted-foreground">{scan.caseId} · {timeAgo(scan.scannedAt)}</p>
+                      {originGeo && <p className="mt-1"><GeoLine geo={originGeo} compact /></p>}
                     </div>
                     <p className={`max-w-40 truncate font-mono text-xs ${originIp ? "text-foreground" : "text-muted-foreground"}`}>{originIp ?? "Not disclosed"}</p>
                   </div>
@@ -124,7 +127,8 @@ const engineSignals = [
   { name: "Evidence fingerprinting", status: true, note: "SHA-256 via WebCrypto" },
   { name: ".eml intake (≤1 MB)", status: true, note: "Local file ingestion" },
   { name: "DNS-level SPF/DKIM/DMARC verification", status: true, note: "Live · DNS-over-HTTPS" },
-  { name: "IP reputation, ASN & geolocation", status: false, note: "Phase 2 · origin map" },
+  { name: "IP geolocation & ASN attribution", status: true, note: "Live · city-level, per hop" },
+  { name: "IP reputation / threat feeds", status: false, note: "Phase 2 · server" },
   { name: "Lookalike-domain detection", status: false, note: "Phase 2 · server" },
   { name: "URL extraction & reputation", status: false, note: "Phase 2 · server" },
 ];

@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Inbox, ShieldCheck, XCircle, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { flagEmoji, locationLabel, type GeoInfo } from "@/lib/geo";
 
 export type PageKey = "overview" | "investigations" | "relay" | "campaign" | "evidence" | "health" | "settings";
 
@@ -128,6 +129,18 @@ export function Bar({ label, value, pct, tone }: { label: string; value: string;
         <div className={`h-full ${tone}`} style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
       </div>
     </div>
+  );
+}
+
+export function GeoLine({ geo, compact = false }: { geo: GeoInfo; compact?: boolean }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+      <span aria-hidden="true">{flagEmoji(geo.countryCode)}</span>
+      <span className="font-medium text-foreground">{locationLabel(geo)}</span>
+      {geo.source === "demo" && <span className="border border-brand/40 bg-brand/10 px-1 py-px font-mono text-[8px] uppercase tracking-wider text-brand">demo</span>}
+      {geo.asn && <span className="font-mono text-[10px] text-muted-foreground">{geo.asn}</span>}
+      {geo.isp && !compact && <span className="font-mono text-[10px] text-muted-foreground">{geo.isp}</span>}
+    </span>
   );
 }
 

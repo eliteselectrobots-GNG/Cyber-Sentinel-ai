@@ -1,5 +1,6 @@
 import { scanEmail, type EmailScanResult } from "./email-scanner";
 import type { DnsEnrichment } from "./dns";
+import type { GeoInfo } from "./geo";
 
 export type StoredScan = {
   /** Stable unique id (uuid). */
@@ -14,6 +15,8 @@ export type StoredScan = {
   demo?: boolean;
   /** Live DNS authentication results captured at scan time (if reachable). */
   auth?: DnsEnrichment;
+  /** Geolocation enrichment per IP, captured at scan time. */
+  geo?: Record<string, GeoInfo>;
 };
 
 const DB_NAME = "aegistrace-db";
@@ -102,7 +105,7 @@ export async function verifyEvidence(raw: string, expectedHash: string): Promise
   return { matches: result.evidenceHash === expectedHash, result };
 }
 
-export function toStoredScan(raw: string, result: EmailScanResult, scannedAt = Date.now(), demo = false, auth?: DnsEnrichment): StoredScan {
+export function toStoredScan(raw: string, result: EmailScanResult, scannedAt = Date.now(), demo = false, auth?: DnsEnrichment, geo?: Record<string, GeoInfo>): StoredScan {
   const scan: StoredScan = {
     id: crypto.randomUUID(),
     caseId: result.id,
@@ -112,6 +115,7 @@ export function toStoredScan(raw: string, result: EmailScanResult, scannedAt = D
   };
   if (demo) scan.demo = true;
   if (auth && auth.checks.length > 0) scan.auth = auth;
+  if (geo && Object.keys(geo).length > 0) scan.geo = geo;
   return scan;
 }
 
