@@ -72,8 +72,29 @@ function domainOf(value: string): string {
   return firstAddress(value).split("@")[1]?.toLowerCase() ?? "";
 }
 
+/** Accepts only canonical dotted-quads — real Received-header IPs never carry leading zeros. */
+function canonicalIpv4(ip: string): string | null {
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) return null;
+  for (const octet of ip.split(".")) {
+    if (octet.length > 1 && octet.startsWith("0")) return null; // e.g. 08.23.06.20 is a parsing artifact, never a real address
+    const num = Number(octet);
+    if (!Number.isInteger(num) || num > 255 || String(num) !== octet) return null;
+  }
+  return ip;
+}
+
 function extractIps(value: string): string[] {
-  return [...new Set(value.match(ipPattern) ?? [])];
+  const candidates = (value.match(ipPattern) ?? [])
+    .map(canonicalIpv4)
+    .filter((ip): ip is string => ip !== null);
+  if (candidates.length === 0) return [];
+  // Received headers carry the real hop IP inside parentheses or brackets;
+  // prefer those so date/id fragments elsewhere in the line can't win.
+  const bracketed = new Set(
+    [...value.matchAll(/[\[(](\d{1,3}(?:\.\d{1,3}){3})[\])]/g)].map((match) => match[1])
+  );
+  const preferred = candidates.filter((ip) => bracketed.has(ip));
+  return [...new Set(preferred.length > 0 ? preferred : candidates)];
 }
 
 async function sha256(value: string): Promise<string> {

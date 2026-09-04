@@ -1,6 +1,8 @@
 import { AlertTriangle, CheckCircle2, Inbox, ShieldCheck, XCircle, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { flagEmoji, locationLabel, type GeoInfo } from "@/lib/geo";
+import { classifyEmail, classMeta, getOrgDomain } from "@/lib/advanced";
+import type { StoredScan } from "@/lib/store";
 
 export type PageKey = "overview" | "investigations" | "relay" | "campaign" | "evidence" | "health" | "settings";
 
@@ -142,6 +144,20 @@ export function GeoLine({ geo, compact = false }: { geo: GeoInfo; compact?: bool
       {geo.isp && !compact && <span className="font-mono text-[10px] text-muted-foreground">{geo.isp}</span>}
     </span>
   );
+}
+
+const classTone: Record<"critical" | "warning" | "brand" | "safe", string> = {
+  critical: "border-status-critical/40 bg-status-critical/10 text-status-critical",
+  warning: "border-status-warning/40 bg-status-warning/10 text-status-warning",
+  brand: "border-brand/40 bg-brand/10 text-brand",
+  safe: "border-status-safe/30 bg-status-safe/10 text-status-safe",
+};
+
+/** Compact 5-class verdict chip (Fraud / Phishing / Impersonation / Suspicious / Legitimate). */
+export function ClassTag({ scan, scans }: { scan: StoredScan; scans: StoredScan[] }) {
+  const detection = useMemo(() => classifyEmail(scan, scans, getOrgDomain()), [scan, scans]);
+  const meta = classMeta[detection.className];
+  return <span className={`inline-flex items-center border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${classTone[meta.tone]}`}>{meta.label}</span>;
 }
 
 export function timeAgo(timestamp: number): string {

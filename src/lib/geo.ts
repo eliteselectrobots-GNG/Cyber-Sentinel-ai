@@ -31,6 +31,7 @@ const cache = new Map<string, GeoInfo | null>();
 /** Reserved / private / documentation ranges are never worth a lookup. */
 export function isPublicIpv4(ip: string): boolean {
   if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return false;
+  if (ip.split(".").some((octet) => octet.length > 1 && octet.startsWith("0"))) return false; // leading zeros are never legitimate
   const octets = ip.split(".").map(Number);
   if (octets.some((octet) => octet > 255)) return false;
   const a = octets[0] ?? 0;

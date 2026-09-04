@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { timeAgo, Bar, Card, CardHeader, DemoTag, DotLegend, EmptyState, GeoLine, PageHeader, SeverityBadge, Stat, type PageKey } from "./ui";
+import { timeAgo, Bar, Card, CardHeader, ClassTag, DemoTag, DotLegend, EmptyState, GeoLine, PageHeader, SeverityBadge, Stat, type PageKey } from "./ui";
 
 const severityColors: Record<string, string> = { Critical: "#e5484d", High: "#e2c04c", Medium: "#35c7c0", Low: "#53d88a" };
 const signalTone: Record<string, string> = { critical: "bg-status-critical", high: "bg-status-warning", medium: "bg-brand", info: "bg-brand" };
@@ -81,7 +81,7 @@ export function OverviewPage({ scans, openScanner, openCase, navigate, notify, l
         <Stat label="Evidence fingerprints" value={String(scans.length)} sub="SHA-256 · stored locally" icon={Fingerprint} tone="safe" />
       </section>
 
-      {latest && <LatestScanCard scan={latest} notify={notify} />}
+      {latest && <LatestScanCard scan={latest} scans={scans} notify={notify} />}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.8fr)]">
         <Card labelledBy="queue-heading">
@@ -98,6 +98,7 @@ export function OverviewPage({ scans, openScanner, openCase, navigate, notify, l
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <p className="text-xs font-semibold text-foreground">{scan.result.sender}</p>
+                      <ClassTag scan={scan} scans={scans} />
                       <span className="text-[10px] text-muted-foreground">{timeAgo(scan.scannedAt)}</span>
                       {scan.demo && <DemoTag />}
                     </div>
@@ -198,7 +199,7 @@ export function OverviewPage({ scans, openScanner, openCase, navigate, notify, l
   );
 }
 
-function LatestScanCard({ scan, notify }: { scan: StoredScan; notify: (msg: string) => void }) {
+function LatestScanCard({ scan, scans, notify }: { scan: StoredScan; scans: StoredScan[]; notify: (msg: string) => void }) {
   const [verifyState, setVerifyState] = useState<"idle" | "checking" | "ok" | "fail">("idle");
 
   const runVerify = async () => {
@@ -216,6 +217,7 @@ function LatestScanCard({ scan, notify }: { scan: StoredScan; notify: (msg: stri
             <Badge variant="outline" className="border-brand/40 bg-brand/10 text-brand">Latest case</Badge>
             <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{scan.caseId} · {scan.result.headersFound} header values parsed · {timeAgo(scan.scannedAt)}</span>
             {scan.demo && <DemoTag />}
+            <ClassTag scan={scan} scans={scans} />
           </div>
           <h2 id="latest-case-heading" className="max-w-3xl truncate font-display text-lg font-semibold">{scan.result.subject}</h2>
           <p className="mt-1 text-xs text-muted-foreground">From {scan.result.senderAddress} · {scan.result.receivedAt}</p>

@@ -118,9 +118,15 @@ export function CampaignPage({ scans }: { scans: StoredScan[] }) {
 }
 
 const engineSignals = [
-  { name: "Urgency & pressure language", status: true, note: "Heuristic text analysis" },
-  { name: "Payment-diversion language", status: true, note: "Invoice / bank change cues" },
-  { name: "Credential-harvesting cues", status: true, note: "Login / quota / verification language" },
+  { name: "NLP language & social-engineering tactics", status: true, note: "Urgency · fear · greed · authority · secrecy pressure" },
+  { name: "BEC pattern detection", status: true, note: "Payment diversion · fake invoice · credential harvest · executive impersonation" },
+  { name: "5-class classification verdict", status: true, note: "Legitimate / Suspicious / Impersonated / Phishing / Fraud" },
+  { name: "Display-name & Return-Path spoofing", status: true, note: "Cross-field sender alignment" },
+  { name: "Link-disguise & obfuscated URL detection", status: true, note: "Anchor text vs destination · IP literals · encoding" },
+  { name: "Executable / macro attachment flags", status: true, note: "exe · scr · docm · xlsm · archives" },
+  { name: "Lookalike-domain & brand impersonation", status: true, note: "Known brands + org profile + evidence history" },
+  { name: "URL structural analysis", status: true, note: "Bad TLDs · punycode · credential paths · shorteners" },
+  { name: "Threat scoring", status: true, note: "Explainable 0–100 with findings" },
   { name: "Reply-to domain mismatch", status: true, note: "Header cross-check" },
   { name: "SPF / DKIM / DMARC anomaly", status: true, note: "Header result parsing" },
   { name: "Relay path reconstruction", status: true, note: "Received header parsing" },
@@ -128,9 +134,9 @@ const engineSignals = [
   { name: ".eml intake (≤1 MB)", status: true, note: "Local file ingestion" },
   { name: "DNS-level SPF/DKIM/DMARC verification", status: true, note: "Live · DNS-over-HTTPS" },
   { name: "IP geolocation & ASN attribution", status: true, note: "Live · city-level, per hop" },
-  { name: "IP reputation / threat feeds", status: false, note: "Phase 2 · server" },
-  { name: "Lookalike-domain detection", status: false, note: "Phase 2 · server" },
-  { name: "URL extraction & reputation", status: false, note: "Phase 2 · server" },
+  { name: "IP reputation / threat feeds", status: false, note: "Phase 2 · server (Spamhaus DNSBL is free via DoH — can add now)" },
+  { name: "Audio transcription", status: false, note: "Phase 2 · server (needs AI API key)" },
+  { name: "Organization-specific RAG", status: false, note: "Phase 2 · server (needs LLM API key)" },
 ];
 
 export function HealthPage({ scans }: { scans: StoredScan[] }) {

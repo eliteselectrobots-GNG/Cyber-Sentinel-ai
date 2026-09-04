@@ -6,6 +6,8 @@ import { verifyEvidence, type StoredScan } from "@/lib/store";
 import { extractIocs, iocTotals, relatedCases, type IoC } from "@/lib/iocs";
 import { distanceKm, flagEmoji, locationLabel, type GeoInfo } from "@/lib/geo";
 import { DemoTag, EmptyState, GeoLine, IntegrityBadge, PageHeader, SeverityBadge, timeAgo, type PageKey } from "./ui";
+import { ClassTag } from "./ui";
+import { classifyEmail, classMeta, getOrgDomain, type AnalysisFlag, type Classification } from "@/lib/advanced";
 
 function downloadReport(scan: StoredScan) {
   const iocs = extractIocs(scan.raw, scan.result);
@@ -54,9 +56,9 @@ function downloadReport(scan: StoredScan) {
   URL.revokeObjectURL(url);
 }
 
-type DetailTab = "Overview" | "Header analysis" | "Origin map" | "IoCs" | "Timeline" | "Body";
+type DetailTab = "Detection" | "Overview" | "Header analysis" | "Origin map" | "IoCs" | "Timeline" | "Body";
 
-const tabs: DetailTab[] = ["Overview", "Header analysis", "Origin map", "IoCs", "Timeline", "Body"];
+const tabs: DetailTab[] = ["Detection", "Overview", "Header analysis", "Origin map", "IoCs", "Timeline", "Body"];
 
 export function InvestigationsPage({
   scans,
@@ -128,6 +130,7 @@ function CaseDetail({ scan, scans, onSelect, onDelete, notify }: { scan: StoredS
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <SeverityBadge risk={scan.result.riskLabel} />
+            <ClassTag scan={scan} scans={scans} />
             <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{scan.caseId} · {scan.result.headersFound} header values parsed · {timeAgo(scan.scannedAt)}</span>
             {scan.demo && <DemoTag />}
           </div>
@@ -158,6 +161,7 @@ function CaseDetail({ scan, scans, onSelect, onDelete, notify }: { scan: StoredS
       </div>
 
       <div className="p-5">
+        {tab === "Detection" && <DetectionTab scan={scan} scans={scans} />}
         {tab === "Overview" && (
           <div className="grid gap-6 lg:grid-cols-2">
             <div>
@@ -536,6 +540,96 @@ function BodyTab({ scan }: { scan: StoredScan }) {
         <Badge variant="outline" className="border-brand/40 bg-brand/10 text-brand">Full text retained</Badge>
         <span>The complete raw message is preserved as evidence and can be re-verified at any time.</span>
       </div>
+    </div>
+  );
+}
+
+const detectionTone: Record<"critical" | "warning" | "brand" | "safe", { hero: string; bar: string }> = {
+  critical: { hero: "border-status-critical/40 bg-status-critical/10 text-status-critical", bar: "bg-status-critical" },
+  warning: { hero: "border-status-warning/40 bg-status-warning/10 text-status-warning", bar: "bg-status-warning" },
+  brand: { hero: "border-brand/40 bg-brand/10 text-brand", bar: "bg-brand" },
+  safe: { hero: "border-status-safe/30 bg-status-safe/10 text-status-safe", bar: "bg-status-safe" },
+};
+
+function DetectionTab({ scan, scans }: { scan: StoredScan; scans: StoredScan[] }) {
+  const detection = useMemo<Classification>(() => classifyEmail(scan, scans, getOrgDomain()), [scan, scans]);
+  const meta = classMeta[detection.className];
+  const tone = detectionTone[meta.tone];
+
+  const tacticGroups = [
+    { label: "Urgency pressure", items: detection.tactics.urgency },
+    { label: "Fear / threat framing", items: detection.tactics.fear },
+    { label: "Greed / reward lure", items: detection.tactics.greed },
+    { label: "Authority invoked", items: detection.tactics.authority },
+    { label: "Secrecy & pressure", items: detection.tactics.pressure },
+  ].filter((group) => group.items.length > 0);
+
+  return (
+    <div className="space-y-6">
+      <div className={`border p-5 ${tone.hero}`}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="font-mono text-[9px] uppercase tracking-[0.2em] opacity-80">AI-assisted classification · computed locally · explainable</p>
+            <p className="mt-1 font-display text-3xl font-semibold">{meta.label}</p>
+            <p className="mt-1 max-w-xl text-xs leading-5 opacity-90">{meta.blurb}</p>
+            <p className="mt-2 text-[11px] leading-5 opacity-80">{detection.verdict}</p>
+          </div>
+          <div className="shrink-0 text-center">
+            <p className="font-display text-4xl font-semibold">{detection.confidence}<span className="font-mono text-xs opacity-70">%</span></p>
+            <p className="mt-1 font-mono text-[9px] uppercase tracking-wider opacity-80">confidence</p>
+          </div>
+        </div>
+        <div className="mt-4 h-1.5 bg-muted">
+          <div className={`h-full ${tone.bar}`} style={{ width: `${Math.max(3, detection.confidence)}%` }} />
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <EvidenceBlock title="What drove this verdict" items={detection.evidence} />
+        <div className="space-y-6">
+          <EvidenceBlock title="BEC & fraud patterns" items={detection.bec} emptyText="No business-email-compromise pattern detected (payment diversion, fake invoice, credential harvesting, executive impersonation)." />
+          <EvidenceBlock title="Phishing indicators" items={detection.indicators} emptyText="No spoofed-sender, disguised-link, or dangerous-attachment indicators detected." />
+        </div>
+      </div>
+
+      {tacticGroups.length > 0 && (
+        <div>
+          <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Language & social-engineering tactics · NLP analysis of subject and body</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {tacticGroups.map((group) => (
+              <div key={group.label} className="border border-border bg-surface-elevated/60 p-3">
+                <p className="text-xs font-semibold text-foreground">{group.label}</p>
+                {group.items.map((item) => (
+                  <p key={item.label} className="mt-1 text-[11px] leading-5 text-muted-foreground">{item.label} — {item.detail}</p>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceBlock({ title, items, emptyText }: { title: string; items: AnalysisFlag[]; emptyText?: string }) {
+  return (
+    <div>
+      <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
+      {items.length === 0 ? (
+        <p className="border border-border bg-shell/60 p-3 text-[11px] leading-5 text-muted-foreground">{emptyText ?? "Nothing detected."}</p>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item) => (
+            <div key={item.label} className="flex items-start gap-3 border-b border-border pb-2 last:border-0">
+              <span className={`mt-1 size-1.5 shrink-0 rounded-full ${item.severity === "critical" ? "bg-status-critical" : item.severity === "high" ? "bg-status-warning" : item.severity === "medium" ? "bg-brand" : "bg-status-safe"}`} />
+              <div>
+                <p className="text-xs font-medium text-foreground">{item.label}</p>
+                <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{item.detail}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
